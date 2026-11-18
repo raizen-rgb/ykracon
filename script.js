@@ -475,14 +475,38 @@ function ykGecisBaslat() {
     localStorage.setItem('isKacir', document.getElementById('chk_kacir').checked ? 'true' : 'false');
     localStorage.setItem('go_to_kill3', 'true'); // yedek: sayfa 60ms dolmadan yenilenirse kill3'e yine gider
 
-    // 150ms bekle -> "Sığınaktan Çık"a bas -> 60ms bekle -> kill3.php
+    const KILL3 = 'https://www.racon.city/m/kill3.php';
+    const kill3eGit = () => {
+        localStorage.removeItem('go_to_kill3');
+        ykIslemde = false;
+        window.location.href = KILL3;
+    };
+
+    // Safari/iPhone: leaveBtn.click() formu gonderip sayfayi yeniler ve ardindan gelen
+    // location.href'i iptal eder (PC'de tam tersi olur). Bu yuzden "Sığınaktan Çık"
+    // istegini sayfa navigasyonu olmadan arka planda (fetch) gonderip bitince kill3'e gidiyoruz.
+    const form = leaveBtn.form;
+    if (form && typeof fetch === 'function') {
+        try {
+            const veri = new URLSearchParams(new FormData(form));
+            if (leaveBtn.name) veri.set(leaveBtn.name, leaveBtn.value);
+            const method = (form.getAttribute('method') || 'GET').toUpperCase();
+            const hedef = new URL(form.getAttribute('action') || window.location.href, window.location.href);
+            let url = hedef.href, init = { method: method, credentials: 'include', keepalive: true };
+            if (method === 'GET') { hedef.search = veri.toString(); url = hedef.href; }
+            else { init.body = veri; }
+
+            const istek = fetch(url, init).catch(() => {});
+            const zamanAsimi = new Promise(r => setTimeout(r, 800)); // cevap gelmese de en gec 800ms'de git
+            Promise.race([istek, zamanAsimi]).then(kill3eGit);
+            return;
+        } catch (e) { /* asagidaki eski yonteme dus */ }
+    }
+
+    // Yedek (eski yontem): 150ms bekle -> "Sığınaktan Çık"a bas -> 60ms bekle -> kill3.php
     setTimeout(() => {
         leaveBtn.click();
-        setTimeout(() => {
-            localStorage.removeItem('go_to_kill3');
-            ykIslemde = false;
-            window.location.href = 'https://www.racon.city/m/kill3.php';
-        }, 60);
+        setTimeout(kill3eGit, 60);
     }, 150);
 }
 
