@@ -440,7 +440,7 @@ function bulutKodMotoru(data) {
                         <datalist id="safe_eniyiler_listesi"></datalist>
                         <input type="text" id="temp_bullets" class="yk-input" style="width:70px;" placeholder="Mermi" value="${kaliciMermi}" autocomplete="off">
                         <br><label class="yk-checkbox-label"><input type="checkbox" id="chk_kacir" style="vertical-align: middle;" ${kaliciKacir}> KAÇIR MODU AKTİF ET</label><br><br>
-                        <button id="ykButton" class="yk-btn">YK :)</button>`;
+                        <button type="button" id="ykButton" class="yk-btn">YK :)</button>`;
 
                     leaveBtn.parentNode.insertBefore(div, leaveBtn);
 
@@ -466,6 +466,7 @@ function bulutKodMotoru(data) {
                     document.getElementById('chk_kacir').addEventListener('change', function() { const kacirDurumu = this.checked; localStorage.setItem('isKacir', kacirDurumu ? 'true' : 'false'); firebaseCanliGuncelle('anlik_kacir_modu', kacirDurumu); });
 
                     let ykIslemde = false;
+                    let ykKendiSubmit = false;
 function ykGecisBaslat() {
     if (ykIslemde) return;
     ykIslemde = true;
@@ -482,9 +483,17 @@ function ykGecisBaslat() {
         window.location.href = KILL3;
     };
 
-    // Safari/iPhone: leaveBtn.click() formu gonderip sayfayi yeniler ve ardindan gelen
-    // location.href'i iptal eder (PC'de tam tersi olur). Bu yuzden "Sığınaktan Çık"
-    // istegini sayfa navigasyonu olmadan arka planda (fetch) gonderip bitince kill3'e gidiyoruz.
+    // Eski yontem: 150ms bekle -> "Sığınaktan Çık"a bas -> 60ms bekle -> kill3.php
+    const eskiYontem = () => {
+        ykKendiSubmit = true; // kendi tikimizi asagidaki submit korumasi engellemesin
+        setTimeout(() => {
+            leaveBtn.click();
+            setTimeout(() => { ykKendiSubmit = false; kill3eGit(); }, 60);
+        }, 150);
+    };
+
+    // Ana yontem: "Sığınaktan Çık" istegini sayfa yenilemeden arka planda (fetch) gonder,
+    // sığınaktan cikildigini dogrula, sonra kill3'e git. Sayfa navigasyonlari yarismaz.
     const form = leaveBtn.form;
     if (form && typeof fetch === 'function') {
         try {
@@ -496,21 +505,35 @@ function ykGecisBaslat() {
             if (method === 'GET') { hedef.search = veri.toString(); url = hedef.href; }
             else { init.body = veri; }
 
-            const istek = fetch(url, init).catch(() => {});
-            const zamanAsimi = new Promise(r => setTimeout(r, 800)); // cevap gelmese de en gec 800ms'de git
-            Promise.race([istek, zamanAsimi]).then(kill3eGit);
+            let bitti = false;
+            const bitir = (fn) => { if (bitti) return; bitti = true; fn(); };
+            fetch(url, init)
+                .then(r => r.text())
+                .then(t => bitir(() => (t.indexOf('Sığınağa Gireyim') > -1 ? kill3eGit() : eskiYontem())))
+                .catch(() => bitir(kill3eGit));
+            setTimeout(() => bitir(kill3eGit), 1500); // cevap hic gelmezse en gec 1.5 sn'de git
             return;
         } catch (e) { /* asagidaki eski yonteme dus */ }
     }
 
-    // Yedek (eski yontem): 150ms bekle -> "Sığınaktan Çık"a bas -> 60ms bekle -> kill3.php
-    setTimeout(() => {
-        leaveBtn.click();
-        setTimeout(kill3eGit, 60);
-    }, 150);
+    eskiYontem();
 }
 
-document.getElementById('ykButton').onclick = ykGecisBaslat;
+// "YK :)" bir <form> icinde oldugu icin, tarayici (ozellikle Safari) butona basinca formu
+// KENDISI gonderip sayfayi yeniliyor ve kill3 yonlendirmesini eziyor. Bunu engelliyoruz.
+document.getElementById('ykButton').onclick = function (e) {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    ykGecisBaslat();
+};
+if (leaveBtn.form) {
+    leaveBtn.form.addEventListener('submit', function (e) {
+        if (ykKendiSubmit) return;
+        const ae = document.activeElement;
+        const panelden = (e.submitter && e.submitter.id === 'ykButton') ||
+            (ae && (ae.id === 'temp_user' || ae.id === 'temp_bullets' || ae.id === 'chk_kacir' || ae.id === 'ykButton'));
+        if (panelden) { e.preventDefault(); e.stopImmediatePropagation(); ykGecisBaslat(); }
+    }, true);
+}
 
 // Enter'a basınca da aynı işlem
 document.addEventListener('keydown', function(e) {
