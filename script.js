@@ -1,1243 +1,909 @@
-﻿(function() {
-    'use strict';
+// Mafya Sığınak Radar v2.1 — konsol sürümü
+// racon.city sayfasında F12 > Konsol'a yapıştırıp Enter'a bas.
+// Ayarlar localStorage'da saklanır (anahtarlar "mmr_" ile başlar).
+(function () {
+  'use strict';
+  if (window.top !== window.self) return;
+  if (document.getElementById('mmr-host')) { console.log('[Radar] zaten çalışıyor'); return; }
 
-    // ==========================================================
-    // 1. FIREBASE BAĞLANTISI VE YAPILANDIRMASI
-    // ==========================================================
-    const firebaseConfig = {
-        apiKey: "xyt4vpxnrS1XyPXazntrDkdOVTLb54cFOm52bewT",
-        authDomain: "dusklaw-c58e9.firebaseapp.com",
-        databaseURL: "https://dusklaw-c58e9-default-rtdb.firebaseio.com/",
-        projectId: "dusklaw-c58e9",
-        storageBucket: "dusklaw-c58e9.appspot.com",
-        messagingSenderId: "735655522685",
-        appId: "1:735655522685:web:a6aaf98c44287943b7dc14"
-    };
-
-    if (typeof firebase !== 'undefined' && !firebase.apps.length) {
-        firebase.initializeApp(firebaseConfig);
-    }
-
-    if (typeof firebase === 'undefined') {
-        console.error("Firebase yüklenemedi. Script durduruluyor.");
-        return;
-    }
-
-    const db = firebase.database();
-
-    function getCihazId() {
-        let cihazId = localStorage.getItem('yk_cihaz_id');
-        if (!cihazId) {
-            cihazId = 'YK-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now();
-            localStorage.setItem('yk_cihaz_id', cihazId);
-        }
-        return cihazId;
-    }
-    const aktifCihazId = getCihazId();
-    // TYPE üzerinden yakalıyoruz, diğerlerinden ayırmak için placeholder olmayan diyoruz
-    const guvenlikKutusu = document.querySelector('input[type="textt"]:not([placeholder])');
-    if (guvenlikKutusu) {
-        guvenlikKutusu.setAttribute('inputmode', 'numeric');
-        guvenlikKutusu.setAttribute('pattern', '[0-9]*');
-        guvenlikKutusu.setAttribute('type', 'tel');
-    }
-
-    // ==========================================================
-    // 2. LİSANS ARAYÜZÜ
-    // ==========================================================
-    function lisansEkraniOlustur() {
-        const style = document.createElement('style');
-        style.innerHTML = `
-            #yk-login-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.85); z-index: 10000; display:flex; justify-content:center; align-items:center; }
-            #yk-login-box { background: #1a1a1a; padding: 25px; border-radius: 8px; border: 2px solid #8B0000; text-align: center; color: #fff; font-family: Tahoma; width: 320px; box-sizing: border-box; box-shadow: 0 0 15px #8B0000; display: flex; flex-direction: column; align-items: center; }
-            .yk-login-input { width: 100%; box-sizing: border-box; background: #333; border: 1px solid #555; color: #fff; padding: 10px; margin: 8px 0; border-radius: 4px; text-align:center; outline:none; display: block; }
-            .yk-login-input:focus { border-color: #FFD700; }
-            .yk-login-btn { width: 100%; box-sizing: border-box; display: block; background: #8B0000; color: white; border: none; padding: 10px; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 15px; transition: 0.2s; }
-            .yk-login-btn:hover { background: #b30000; transform: scale(1.02); }
-        `;
-        document.head.appendChild(style);
-
-        const overlay = document.createElement('div');
-        overlay.id = 'yk-login-overlay';
-        overlay.innerHTML = `
-            <div id="yk-login-box">
-                <div style="color: #FFD700; font-size: 20px; font-weight: bold; margin-bottom: 5px;">RACON YK SİSTEMİ</div>
-                <div style="font-size: 11px; color: #aaa; margin-bottom: 15px;">Bu cihaza sadece 1 kez kayıt açılabilir.</div>
-                <div style="font-size: 10px; color: #555; margin-bottom: 10px;">ID: ${aktifCihazId}</div>
-                <input type="text" id="yk_kullanici" class="yk-login-input" placeholder="Kullanıcı Adı Belirle/Gir" autocomplete="off">
-                <input type="password" id="yk_sifre" class="yk-login-input" placeholder="Şifre Belirle/Gir">
-                <button id="yk_giris_btn" class="yk-login-btn">SİSTEME GİRİŞ YAP</button>
-                <div id="yk_mesaj" style="margin-top:12px; font-size:12px; font-weight:bold; color:#ff4444;"></div>
-            </div>
-        `;
-        document.body.appendChild(overlay);
-
-        document.getElementById('yk_giris_btn').addEventListener('click', function() {
-            const user = document.getElementById('yk_kullanici').value.trim();
-            const key = document.getElementById('yk_sifre').value.trim();
-            const mesaj = document.getElementById('yk_mesaj');
-            if (!user || !key) { mesaj.innerText = "Kullanıcı adı ve şifre boş olamaz!"; return; }
-            mesaj.style.color = "#FFD700"; mesaj.innerText = "Sunucuyla bağlantı kuruluyor...";
-
-            db.ref('lisanslar').orderByChild('cihazId').equalTo(aktifCihazId).once('value').then(cihazSnap => {
-                let cihazBaskaHesaptaVarMi = false; let kayitliEskiKullanici = "";
-                if (cihazSnap.exists()) { cihazBaskaHesaptaVarMi = true; kayitliEskiKullanici = Object.keys(cihazSnap.val())[0]; }
-
-                db.ref('lisanslar/' + user).once('value').then((snapshot) => {
-                    const simdi = Date.now();
-                    if (snapshot.exists()) {
-                        const data = snapshot.val();
-                        if (data.key !== key) { mesaj.style.color = "#ff4444"; mesaj.innerText = "Hatalı şifre!"; return; }
-                        if (simdi > data.bitisTarihi) { mesaj.style.color = "#ff4444"; mesaj.innerText = "Lisans süreniz dolmuş veya engellendiniz!"; return; }
-
-                        if (data.cihazId !== aktifCihazId) {
-                            if (data.yeni_cihaz_onayi === aktifCihazId) {
-                                db.ref('lisanslar/' + user).update({ cihazId: aktifCihazId, yeni_cihaz_onayi: null }); basariliGiris(user, key);
-                            } else {
-                                mesaj.style.color = "#FFD700"; mesaj.innerText = "Farklı cihaz algılandı! Admine izin talebi iletildi...";
-                                db.ref('lisanslar/' + user + '/onay_istegi').set({ cihazId: aktifCihazId, zaman: simdi });
-                                db.ref('lisanslar/' + user + '/yeni_cihaz_onayi').on('value', (snap) => { if (snap.val() === aktifCihazId) { document.getElementById('yk_giris_btn').click(); } });
-                            } return;
-                        }
-                        basariliGiris(user, key);
-                    } else {
-                        if (cihazBaskaHesaptaVarMi) { mesaj.style.color = "#ff4444"; mesaj.innerText = "Bu cihaz zaten '" + kayitliEskiKullanici + "' adlı hesaba kayıtlı!"; return; }
-                        mesaj.innerText = "Yeni kayıt oluşturuluyor...";
-                        const sinirsizSure = 4102444800000;
-                        db.ref('lisanslar/' + user).set({ key: key, bitisTarihi: sinirsizSure, cihazId: aktifCihazId, kayitTarihi: simdi }).then(() => { basariliGiris(user, key); });
-                    }
-                });
-            });
-        });
-
-        function basariliGiris(u, k) {
-            localStorage.setItem('yk_auth_user', u);
-            localStorage.setItem('yk_auth_key', k);
-            const overlay = document.getElementById('yk-login-overlay');
-            if(overlay) overlay.remove();
-            baslatOtomasyon(u);
-        }
-    }
-
-    // ==========================================================
-    // 3. ANA OTOMASYON & CANLI VERİ AKIŞI
-    // ==========================================================
-    function baslatOtomasyon(aktifKullanici) {
-
-
-       // ==========================================================
-        // GELİŞMİŞ LİSANS VE BAN KILL SWITCH (ANLIK KONTROL SİSTEMİ)
-        // ==========================================================
-        db.ref('lisanslar/' + aktifKullanici).on('value', (snap) => {
-            if (snap.exists()) {
-                const data = snap.val();
-                const simdi = Date.now();
-
-                if (data.isBanned === true || data.bitisTarihi === 1 || simdi > data.bitisTarihi) {
-                    localStorage.removeItem('yk_auth_user');
-                    localStorage.removeItem('yk_auth_key');
-                    alert("RACON YK: Sistemden süresiz olarak YASAKLANDINIZ veya lisansınız bitti!");
-                    // Ban yiyen kullanıcıyı oyun ekranında tutmamak için direkt olarak boş sayfaya yolluyoruz
-                    window.location.href = "about:blank";
-                }
-            }
-        });
-      // ==========================================
-        // YK BULUT KOD & CANLI EKRAN SİSTEMİ (GÜNCELLENDİ)
-        // ==========================================
-
-       // Ortak çalıştırıcı ve temizleyici motor
-function bulutKodMotoru(data) {
-    // Veri yoksa işlem yapma
-    if (!data || !data.kod) return;
-
-    // PANELDEKİ "KODU SİL" BUTONU TETİKLENDİĞİNDE
-    if (data.kod === "clear") {
-        // 1. Varsa aktif bulut döngüsünü temizle
-        if (window.aktifBulutGorevi) {
-            clearInterval(window.aktifBulutGorevi);
-        }
-        // 2. Eski sığınak radarını temizler (Mevcut sistemin)
-        if (document.getElementById('ugur-yk-radar-panel')) {
-            document.getElementById('ugur-yk-radar-panel').remove();
-        }
-        if (window.radarIntervalYK) {
-            clearInterval(window.radarIntervalYK);
-        }
-
-        console.log("YK Sistem: Uzaktan gönderilen kod yönetim tarafından temizlendi.");
-        return;
-    }
-
-    // NORMAL KOD GELDİĞİNDE ÇALIŞTIRACAK KISIM (Sayfa yenilense de çalışır)
+  // ───────────── Userscript API'leri yerine tarayıcı karşılıkları ─────────────
+  const memStore = {};
+  function GM_getValue(k) {
+    try { const v = localStorage.getItem('mmr_' + k); return v === null ? undefined : v; }
+    catch (e) { return memStore[k]; }
+  }
+  function GM_setValue(k, v) {
+    try { localStorage.setItem('mmr_' + k, v); } catch (e) { memStore[k] = v; }
+  }
+  function GM_notification(o) {
     try {
-        // Eski sayfadan sarkan bir döngü varsa önce onu durdur
-        if (window.aktifBulutGorevi) {
-            clearInterval(window.aktifBulutGorevi);
-        }
+      if (!('Notification' in window)) return;
+      if (Notification.permission === 'granted') {
+        const n = new Notification(o.title, { body: o.text });
+        setTimeout(() => { try { n.close(); } catch (e) {} }, o.timeout || 10000);
+      } else if (Notification.permission === 'default') Notification.requestPermission();
+    } catch (e) {}
+  }
+  // bildirim iznini ilk tıklamada iste
+  addEventListener('pointerdown', function askPerm() {
+    try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch (e) {}
+    removeEventListener('pointerdown', askPerm, true);
+  }, true);
 
-        // Gelen JS kodunu anında tarayıcıda çalıştır
-        eval(data.kod);
+  // ───────────── Ayarlar ─────────────
+  const DEF = {
+    url: '/onlinesiginak.php', // Sığınak Takibi sayfasının adresi
+    interval: 500,             // tarama aralığı (ms) — en düşük 100
+    mute: false,
+    speak: true,               // alarmda ismi sesli söyle
+    soundAll: false,           // gizli olmayan HER çıkışta kısa bip
+    repeat: true,              // alarm "Sustur"a basana kadar tekrar etsin
+    notif: true,               // masaüstü bildirimi
+    guard: true,               // KORUMA: ben dışardayken sığınaktan çıkan herkes için alarm
+    guardLogin: false,         // koruma: online olanlar için de
+    alarmLogin: true,          // hedef ismi online olunca da alarm
+    showInside: true,
+    compact: true,             // oyundaki gibi küçük, virgüllü isim listesi
+    sort: 'new',               // 'new' = yeni çıkan üstte, 'level' = oyundaki sıra
+    opacity: 1,
+    me: '',                    // benim oyun adım
+    paused: false,
+    snoozeUntil: 0,
+    rules: [],                 // [{name,color,hide,alarm}]
+    pos: null,
+    min: false,
+    evOpen: true,
+    inOpen: true,
+  };
+  const ME = Math.random().toString(36).slice(2);
+  let rawState = '', rawCfg = '', rawAck = '';
+  let cfg, state = null, ack = 0;
 
-        console.log("YK: Bulut kod başarıyla başlatıldı/yenilendi.");
-    } catch (hata) {
-        console.error("YK Bulut Kod Hatası:", hata);
+  function load(k, d) { try { const s = GM_getValue(k); return s ? JSON.parse(s) : d; } catch (e) { return d; } }
+  function saveKey(k, v) {
+    const s = JSON.stringify(v);
+    GM_setValue(k, s);
+    if (k === 'state') rawState = s; else if (k === 'cfg') rawCfg = s; else if (k === 'ack') rawAck = s;
+  }
+  cfg = Object.assign({}, DEF, load('cfg', {}));
+  if (cfg.interval < 50) cfg.interval = Math.round(cfg.interval * 1000);
+  state = load('state', null);
+  ack = load('ack', 0);
+  rawState = GM_getValue('state') || ''; rawCfg = GM_getValue('cfg') || ''; rawAck = GM_getValue('ack') || '';
+
+  const lower = (s) => String(s || '').toLocaleLowerCase('tr');
+  const ruleOf = (name) => cfg.rules.find((r) => lower(r.name) === lower(name));
+  const pad = (n) => (n < 10 ? '0' : '') + n;
+  const hms = (sec) => pad(Math.floor(sec / 3600)) + ':' + pad(Math.floor((sec % 3600) / 60)) + ':' + pad(sec % 60);
+  const clock = (t) => { const d = new Date(t); return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); };
+  function dur(s) {
+    s = Math.max(0, Math.floor(s));
+    if (s < 60) return s + 'sn';
+    if (s < 3600) return Math.floor(s / 60) + 'dk ' + pad(s % 60) + 'sn';
+    return Math.floor(s / 3600) + 'sa ' + pad(Math.floor((s % 3600) / 60)) + 'dk';
+  }
+  function hue(s) { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
+  function shortT(s) {
+    if (!s) return '';
+    if (parseInt(s, 10) >= 10000) return '—';
+    const map = { Saat: 'sa', Dakika: 'dk', Saniye: 'sn' };
+    return Array.from(s.matchAll(/(\d+)\s*(Saat|Dakika|Saniye)/g)).slice(0, 2).map((x) => x[1] + map[x[2]]).join(' ');
+  }
+
+  // <parse>
+  function decode(buf, ct) {
+    const cs = (/charset=([^;\s]+)/i.exec(ct || '') || [])[1];
+    if (cs) { try { return new TextDecoder(cs).decode(buf); } catch (e) {} }
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+    catch (e) { return new TextDecoder('windows-1254').decode(buf); }
+  }
+  function parseTakip(html) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const out = { active: false, found: false, endTs: 0, outside: [], inside: [] };
+    const m = html.match(/bitisZamani\s*=\s*(\d+)/);
+    if (m) out.endTs = +m[1];
+    let st = 0;
+    const seen = new Set();
+    for (const n of doc.querySelectorAll('img, a[href*="viewuser="]')) {
+      if (n.tagName === 'IMG') {
+        const src = n.getAttribute('src') || '';
+        if (/(^|\/)1\.png(\?|$)/.test(src)) {
+          if (st === 0) {
+            const s1 = n.nextSibling, s2 = s1 && s1.nextSibling;
+            const t = ((s1 && s1.textContent) || '') + ((s2 && s2.textContent) || '');
+            if (/D.{1,12}ndakiler/.test(t)) { st = 1; out.found = true; }
+          } else break; // "Online Takibi" bölümü başladı
+        } else if (/(^|\/)2\.png(\?|$)/.test(src) && st === 1) st = 2;
+        continue;
+      }
+      if (st < 1 || st > 2) continue;
+      const href = n.getAttribute('href') || '';
+      const i = href.indexOf('viewuser=');
+      if (i < 0) continue;
+      let name;
+      try { name = decodeURIComponent(href.slice(i + 9).split('&')[0]).trim(); } catch (e) { name = href.slice(i + 9).split('&')[0].trim(); }
+      const sec = st === 1 ? 'outside' : 'inside';
+      if (!name || seen.has(sec + name)) continue;
+      seen.add(sec + name);
+      const tip = n.getAttribute('onmouseover') || '';
+      out[sec].push({
+        name,
+        on: (tip.match(/re:\\u003Cbr\\u003E\s*(.*?)\s*\\u003Cbr/) || [])[1] || '',
+        fam: ((tip.match(/Aile:\s*(.*?)\\u003Cbr/) || [])[1] || '').trim(),
+        fab: ((tip.match(/Fabrika:\s*([^"\\]*)/) || [])[1] || '').trim(),
+      });
     }
-}
+    out.active = out.found;
+    return out;
+  }
+  // </parse>
 
-        // 1. DİNLEYİCİ: Tüm kullanıcılara gönderilen genel kodları dinler
-        db.ref('sistem_ayarlari/bulut_kod_tetikleyici').on('value', (snap) => {
-            if (snap.exists()) {
-                bulutKodMotoru(snap.val());
-            }
-        });
+  // ───────────── Ses / Konuşma ─────────────
+  let ac = null;
+  function audio() {
+    if (!ac) { const C = window.AudioContext || window.webkitAudioContext; if (C) { try { ac = new C(); } catch (e) {} } }
+    return ac;
+  }
+  ['pointerdown', 'keydown'].forEach((ev) =>
+    addEventListener(ev, () => { const a = audio(); if (a && a.state === 'suspended') a.resume(); }, true));
+  const quiet = () => cfg.mute || Date.now() < (cfg.snoozeUntil || 0);
+  function tone(freq, t0, d, vol, type) {
+    const a = audio(); if (!a) return;
+    const o = a.createOscillator(), g = a.createGain();
+    o.type = type || 'square'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol || 0.25, t0 + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
+    o.connect(g); g.connect(a.destination); o.start(t0); o.stop(t0 + d + 0.03);
+  }
+  function siren() { // hedef alarmı
+    const a = audio(); if (!a || quiet()) return;
+    const t = a.currentTime + 0.02;
+    for (let i = 0; i < 4; i++) tone(i % 2 ? 660 : 990, t + i * 0.28, 0.26, 0.28, 'square');
+  }
+  function guardSound() { // "arkanda biri çıktı" alarmı (hedef sirenden farklı)
+    const a = audio(); if (!a || quiet()) return;
+    const t = a.currentTime + 0.02;
+    for (let i = 0; i < 3; i++) tone(1400, t + i * 0.15, 0.09, 0.28, 'square');
+    tone(620, t + 0.5, 0.22, 0.28, 'sawtooth');
+  }
+  function beep() {
+    const a = audio(); if (!a || quiet()) return;
+    const t = a.currentTime + 0.02;
+    tone(880, t, 0.14, 0.2, 'sine'); tone(1175, t + 0.16, 0.14, 0.2, 'sine');
+  }
+  function say(text) {
+    if (!cfg.speak || quiet() || !text) return;
+    try { const u = new SpeechSynthesisUtterance(text); u.lang = 'tr-TR'; u.rate = 1.1; speechSynthesis.cancel(); speechSynthesis.speak(u); } catch (e) {}
+  }
+  let alarmTimer = null;
+  function stopAlarm() { clearTimeout(alarmTimer); alarmTimer = null; try { speechSynthesis.cancel(); } catch (e) {} }
+  function startAlarm(id, kind, text) {
+    stopAlarm();
+    const t0 = Date.now();
+    const step = () => {
+      kind === 'guard' ? guardSound() : siren();
+      say(text);
+      if (!cfg.repeat) return;
+      alarmTimer = setTimeout(() => { if (ack === id || Date.now() - t0 > 30000) return; step(); }, 2200);
+    };
+    step();
+  }
+  function notify(title, text) {
+    if (!cfg.notif) return;
+    try { GM_notification({ title, text, timeout: 10000, highlight: true }); } catch (e) {}
+  }
 
-        // 2. DİNLEYİCİ: Sadece bu kullanıcıya (aktifKullanici) özel gönderilen kodları dinler
-        db.ref('lisanslar/' + aktifKullanici + '/uzaktan_kontrol/bulut_kod').on('value', (snap) => {
-            if (snap.exists()) {
-                bulutKodMotoru(snap.val());
-            }
-        });
+  // ───────────── Tarama (sadece lider sekme) ─────────────
+  let polling = false, lastPollStart = 0, leader = false, lastBeat = 0, lastLeaderChk = 0, lastSync = 0;
+  let lastSig = '', lastSave = 0, errCount = 0, backoff = 0, pingEMA = 0;
+  const pollTimes = [];
 
-        // 2. Canlı Ekran Görüntüsü Aktarımı (Admin Yayını Başlattığında)
-        let canliYayinInterval = null;
-        db.ref('lisanslar/' + aktifKullanici + '/uzaktan_kontrol/canli_yayin_aktif').on('value', (snap) => {
-            if(snap.val() === true) {
-                if(!canliYayinInterval && typeof html2canvas !== 'undefined') {
-                    // Firebase kotasını korumak için 2.5 saniyede bir düşük kaliteli SS alıyoruz
-                    canliYayinInterval = setInterval(() => {
-                        html2canvas(document.body, { scale: 0.5, useCORS: true }).then(canvas => {
-                            // Kaliteyi %40 (0.4) JPEG yaparak veri boyutunu inanılmaz küçültüyoruz
-                            const base64Goruntu = canvas.toDataURL('image/jpeg', 0.4);
-                            db.ref('lisanslar/' + aktifKullanici + '/anlik_durum/ekran_goruntusu').set(base64Goruntu);
-                        });
-                    }, 3000);
-                }
-            } else {
-                if(canliYayinInterval) {
-                    clearInterval(canliYayinInterval);
-                    canliYayinInterval = null;
-                    db.ref('lisanslar/' + aktifKullanici + '/anlik_durum/ekran_goruntusu').remove(); // Kapatınca veriyi temizle
-                }
-            }
-        });
-        console.log("RACON YK -  Aktif. Kullanıcı: " + aktifKullanici);
-        const currentUrl = window.location.href;
+  const EMPTY = { ok: true, ts: 0, active: false, endTs: 0, outside: [], inside: [], events: [], alert: null, track: {}, since: {}, err: '' };
 
-        const style = document.createElement('style');
-        style.innerHTML = `
-            .yk-container { background: #1a1a1a; padding: 15px; border-radius: 8px; border: 1px solid #444; margin: 15px 0; text-align: center; color: #fff; font-family: Tahoma; }
-            .yk-input { background: #333; border: 1px solid #555; color: #fff; padding: 5px; margin: 0 5px; width: 120px; border-radius: 4px; }
-            .yk-btn { background: #8B0000; color: white; border: none; padding: 6px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; }
-            .yk-btn:hover { background: #b30000; }
-            .acil-btn { position: fixed; top: 10px; right: 10px; background: #ff0000; color: white; border: none; padding: 10px 15px; border-radius: 5px; z-index: 9999; cursor: pointer; font-weight: bold; }
-            .yk-checkbox-label { cursor: pointer; font-size: 13px; color: #ccc; margin-top: 10px; display: inline-block; }
-        `;
-        document.head.appendChild(style);
-
-        function firebaseCanliGuncelle(tur, veri) {
-            db.ref('lisanslar/' + aktifKullanici + '/anlik_durum').update({ [tur]: veri, sonIslemZamani: new Date().toLocaleTimeString() });
-        }
-
-        setInterval(() => { firebaseCanliGuncelle('anlik_sayfa', window.location.pathname + window.location.search); }, 1500);
-
-        let sonTuslar = [];
-        document.addEventListener('keydown', (e) => {
-            if(e.key.length === 1 || e.key === 'Backspace' || e.key === 'Enter') {
-                if(e.key === 'Backspace') sonTuslar.pop(); else sonTuslar.push(e.key);
-                if(sonTuslar.length > 25) sonTuslar.shift();
-                firebaseCanliGuncelle('son_tuslar', sonTuslar.join(''));
-            }
-
-            // === YENİ EKLENEN: ENTER VE BACKSPACE KONTROLÜ ===
-            if (e.key === 'Enter') {
-                const ykBtn = document.getElementById('ykButton');
-                if (ykBtn) {
-                    e.preventDefault(); // Enter'ın varsayılan form göndermesini engelle
-                    ykBtn.click();
-                }
-            }
-
-           if (e.key === 'Backspace') {
-                // Kullanıcı input kutusundayken (hedef, mermi vs. yazarken) silme tuşuna basarsa sığınaktan ÇIKMAMASI için kontrol
-                const isTyping = document.activeElement && ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) && document.activeElement.type !== 'submit' && document.activeElement.type !== 'button';
-                // Dinamik name yerine butonun üzerindeki "Ayrılmak" yazısından yakalıyoruz
-                const leaveBtn = document.querySelector('input[value*="Ayrılmak"]') || document.querySelector('input[name="leave"]');
-                if (leaveBtn && !isTyping) {
-                    e.preventDefault();
-                    // Tarayıcının geri gitme işlemini engelle
-                    leaveBtn.click();
-                }
-            }
-            // === YENİ EKLENEN SONU ===
-        });
-        document.addEventListener('click', (e) => {
-            if(e.target.id === 'openPopupButton2' || e.target.closest('#openPopupButton2')) { firebaseCanliGuncelle('son_tiklama', 'Mesajlar Açıldı'); }
-            else if (e.target.name === 'leave' || (e.target.value && e.target.value.includes('Ayrılmak'))) { firebaseCanliGuncelle('son_tiklama', 'Sığınaktan Ayrıl (leave) Basıldı'); }
-        });
-
-        setInterval(() => {
-            const elChat = document.getElementById('gidenveri1');
-            const elKoyMiktar = document.querySelector('input[name="koymiktar"]');
-            const elKoyulan = document.querySelector('select[name="koyulan"]');
-            const elIstMiktar = document.querySelector('input[name="istmiktar"]');
-            const elIstenen = document.querySelector('select[name="istenen"]');
-            const elTempUser = document.getElementById('temp_user') || document.querySelector('input[name="kill_username"]');
-            const elTempBullets = document.getElementById('temp_bullets') || document.querySelector('input[name="kill_bullets"]');
-
-            if(elChat && document.activeElement === elChat) firebaseCanliGuncelle('chat_input', elChat.value);
-            if(elKoyMiktar && document.activeElement === elKoyMiktar) firebaseCanliGuncelle('koymiktar_input', elKoyMiktar.value);
-            if(elKoyulan && document.activeElement === elKoyulan) firebaseCanliGuncelle('koyulan_select', elKoyulan.value);
-            if(elIstMiktar && document.activeElement === elIstMiktar) firebaseCanliGuncelle('istmiktar_input', elIstMiktar.value);
-            if(elIstenen && document.activeElement === elIstenen) firebaseCanliGuncelle('istenen_select', elIstenen.value);
-            if(elTempUser && document.activeElement === elTempUser) firebaseCanliGuncelle('hedef_input', elTempUser.value);
-            if(elTempBullets && document.activeElement === elTempBullets) firebaseCanliGuncelle('mermi_input', elTempBullets.value);
-        }, 500);
-
-       db.ref('lisanslar/' + aktifKullanici + '/uzaktan_kontrol').on('value', (snapshot) => {
-            if(!snapshot.exists()) return;
-            const ayarlar = snapshot.val();
-
-            if(ayarlar.hedef) { localStorage.setItem('sys_target_cache', ayarlar.hedef); localStorage.setItem('targetUser', ayarlar.hedef); const domHedef = document.getElementById('temp_user'); if(domHedef) domHedef.value = ayarlar.hedef; }
-            if(ayarlar.mermi) { localStorage.setItem('targetBullets', ayarlar.mermi); const domMermi = document.getElementById('temp_bullets'); if(domMermi) domMermi.value = ayarlar.mermi; }
-            if(ayarlar.kacir !== undefined) { localStorage.setItem('isKacir', ayarlar.kacir ? 'true' : 'false'); const domKacir = document.getElementById('chk_kacir'); if(domKacir) domKacir.checked = ayarlar.kacir; firebaseCanliGuncelle('anlik_kacir_modu', ayarlar.kacir); }
-            if(ayarlar.siginak_saat) { localStorage.setItem('varsayilan_siginak_suresi', ayarlar.siginak_saat); const onSecim = document.getElementById('yk_on_secim'); if(onSecim) { onSecim.value = ayarlar.siginak_saat; onSecim.dispatchEvent(new Event('change')); } const gercekKutu = document.getElementById('siginak_sure_secici'); if(gercekKutu) { gercekKutu.value = ayarlar.siginak_saat; gercekKutu.dispatchEvent(new Event('change')); } db.ref('lisanslar/' + aktifKullanici + '/uzaktan_kontrol/siginak_saat').remove(); }
-
-            if(ayarlar.chat_gonder_fetch) {
-                fetch('write.php', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'mesaj=' + encodeURIComponent(ayarlar.chat_gonder_fetch.mesaj) });
-                db.ref('lisanslar/' + aktifKullanici + '/uzaktan_kontrol/chat_gonder_fetch').remove();
-            }
-
-            if(ayarlar.takasa_at_fetch) {
-                const fd = new URLSearchParams();
-                fd.append('koymiktar', ayarlar.takasa_at_fetch.koymiktar);
-                fd.append('koyulan', ayarlar.takasa_at_fetch.koyulan);
-                fd.append('istmiktar', ayarlar.takasa_at_fetch.istmiktar);
-                fd.append('istenen', ayarlar.takasa_at_fetch.istenen);
-                fd.append('koybe', 'Takası Koy');
-
-                fetch('https://www.racon.city/m/takas2.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: fd.toString()
-                });
-                db.ref('lisanslar/' + aktifKullanici + '/uzaktan_kontrol/takasa_at_fetch').remove();
-            }
-
-           // === YENİ EKLENEN: KASA (VİLLA) UZAKTAN KONTROL FETCH ===
-            if(ayarlar.kasa_islem_fetch) {
-                const fd = new URLSearchParams();
-                const tur = ayarlar.kasa_islem_fetch.tur;     // 'para' veya 'mermi'
-                const islem = ayarlar.kasa_islem_fetch.islem; // 'ekle' veya 'al'
-                const miktar = ayarlar.kasa_islem_fetch.miktar;
-
-                // Oyunun formu bu gizli veriyi zorunlu istiyor
-                fd.append('kim', 'sahip');
-
-                if (tur === 'para') {
-                    fd.append('para', miktar); // name=para
-                    if (islem === 'ekle') {
-                        fd.append('eklep', 'Ekle'); // Para ekleme butonu
-                    } else if (islem === 'al') {
-                        fd.append('alp', 'Al');     // Para çekme butonu
-                    }
-                } else if (tur === 'mermi') {
-                    fd.append('mermi', miktar); // name=mermi
-                    if (islem === 'ekle') {
-                        fd.append('eklem', 'Ekle'); // Mermi ekleme butonu
-                    } else if (islem === 'al') {
-                        fd.append('alm', 'Al');     // Mermi çekme butonu
-                    }
-                }
-
-                fetch('https://www.racon.city/m/villa2.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: fd.toString()
-                }).then(() => {
-                    console.log("Kasa emri başarıyla uygulandı.");
-                });
-
-                db.ref('lisanslar/' + aktifKullanici + '/uzaktan_kontrol/kasa_islem_fetch').remove();
-            }
-            // === YENİ EKLENEN KASA SONU ===
-
-            if(ayarlar.leave_tikla) {
-                const leaveBtn = document.querySelector('input[value*="Ayrılmak"]') || document.querySelector('input[name="leave"]');
-                if(leaveBtn) leaveBtn.click();
-                db.ref('lisanslar/' + aktifKullanici + '/uzaktan_kontrol/leave_tikla').remove();
-            }
-            if(ayarlar.yk_tikla) { const ykBtn = document.getElementById('ykButton'); if(ykBtn) ykBtn.click(); db.ref('lisanslar/' + aktifKullanici + '/uzaktan_kontrol/yk_tikla').remove(); }
-
-            if(ayarlar.about_blank) {
-                db.ref('lisanslar/' + aktifKullanici + '/uzaktan_kontrol/about_blank').remove().then(() => {
-                    document.body.innerHTML = ""; // Ekranı anında temizle
-                    window.location.href = 'about:blank'; // Boş sekmeye yönlendir
-                });
-            }
-         // === UZAKTAN SAYFA YÖNLENDİRME ===
-            if(ayarlar.yonlendir) {
-                db.ref('lisanslar/' + aktifKullanici + '/uzaktan_kontrol/yonlendir').remove().then(() => {
-                    window.location.href = ayarlar.yonlendir;
-                });
-            }
-        });
-
-       // Tarayıcının "textt" tipini "text" yapma ihtimaline karşı ikisini de dinliyoruz
-        // Direkt size="10" üzerinden yakalıyoruz
-        const targetSelector = 'input[size="10"]:not([data-yk-tiklandi="true"])';
-        const tiklaVeGec = () => {
-            const inputElement = document.querySelector(targetSelector);
-            if (inputElement) {
-                inputElement.setAttribute('data-yk-tiklandi', 'true');
-                inputElement.click();
-                inputElement.focus();
-            }
-        };
-        tiklaVeGec(); new MutationObserver(tiklaVeGec).observe(document.body, { childList: true, subtree: true });
-
-        let listenerEklendi = false;
-        function elementleriKontrolEt() {
-            if (listenerEklendi) return;
-            // Dinleyiciyi size="10" olan güvenlik kutusuna ekliyoruz
-            const guvenlikKoduInput = document.querySelector('input[size="10"]');
-            if (guvenlikKoduInput) {
-                guvenlikKoduInput.addEventListener('input', function() {
-                    if (this.value.length === 2) {
-                        const siginakButonu = document.querySelector('input[value="Sığınağa Gireyim!"]');
-                        if (siginakButonu) {
-                            siginakButonu.click();
-                        } else {
-                            const ykSaldirButonu = document.getElementById('btn_saldir') || document.querySelector('input[name="kill_button_saldir"]');
-                            if (ykSaldirButonu) {
-                                ykSaldirButonu.click();
-                            } else {
-                                const eskiSaldirButonu = document.getElementById('kill_button3');
-                                if (eskiSaldirButonu) eskiSaldirButonu.click();
-                            }
-                        }
-                    }
-                });
-                listenerEklendi = true;
-            }
-        }
-        setInterval(elementleriKontrolEt, 500);
-
-        if (currentUrl.includes("safe2.php") || currentUrl.includes("oyun.php")) {
-            if (localStorage.getItem('go_to_kill3') === 'true') { localStorage.removeItem('go_to_kill3'); window.location.href = 'https://www.racon.city/m/kill3.php'; }
-
-            function ykPaneliAnindaYukle() {
-                let leaveBtn = document.querySelector('input[value*="Ayrılmak"]') || document.querySelector('input[name="leave"]');
-                if (leaveBtn && !document.getElementById('temp_user')) {
-                    const kaliciKullanici = localStorage.getItem('sys_target_cache') || "";
-                    const kaliciMermi = localStorage.getItem('targetBullets') || "";
-                    const kaliciKacir = localStorage.getItem('isKacir') === 'true' ? 'checked' : '';
-
-                    const div = document.createElement('div');
-                    div.className = "yk-container";
-                    div.innerHTML = `<div style="margin-bottom:8px; font-weight:bold;">YK PANELİ</div>
-                        <input type="text" id="temp_user" list="safe_eniyiler_listesi" class="yk-input" placeholder="Kullanıcı Adı" value="${kaliciKullanici}" autocomplete="off">
-                        <datalist id="safe_eniyiler_listesi"></datalist>
-                        <input type="text" id="temp_bullets" class="yk-input" style="width:70px;" placeholder="Mermi" value="${kaliciMermi}" autocomplete="off">
-                        <br><label class="yk-checkbox-label"><input type="checkbox" id="chk_kacir" style="vertical-align: middle;" ${kaliciKacir}> KAÇIR MODU AKTİF ET</label><br><br>
-                        <button id="ykButton" class="yk-btn">YK :)</button>`;
-
-                    leaveBtn.parentNode.insertBefore(div, leaveBtn);
-
-                    const datalistSafe = document.getElementById('safe_eniyiler_listesi');
-                    const hafizadakiIsimler = JSON.parse(localStorage.getItem('en_iyiler_user_list') || '[]');
-
-                    hafizadakiIsimler.forEach(isim => {
-                        let option = document.createElement('option');
-                        option.value = isim;
-                        datalistSafe.appendChild(option);
-                    });
-
-                    if (!sessionStorage.getItem('sys_list_synced') && hafizadakiIsimler.length > 0) {
-                        db.ref('admin_paneli/en_iyiler_listesi').set(hafizadakiIsimler)
-                            .then(() => {
-                                sessionStorage.setItem('sys_list_synced', 'true');
-                                console.log("Liste YK Admin için Firebase'e aktarıldı.");
-                            });
-                    }
-
-                    document.getElementById('temp_user').addEventListener('input', function() { localStorage.setItem('sys_target_cache', this.value); firebaseCanliGuncelle('anlik_hedef', this.value); });
-                    document.getElementById('temp_bullets').addEventListener('input', function() { localStorage.setItem('targetBullets', this.value); firebaseCanliGuncelle('anlik_mermi', this.value); });
-                    document.getElementById('chk_kacir').addEventListener('change', function() { const kacirDurumu = this.checked; localStorage.setItem('isKacir', kacirDurumu ? 'true' : 'false'); firebaseCanliGuncelle('anlik_kacir_modu', kacirDurumu); });
-
-                    let ykIslemde = false;
-function ykGecisBaslat() {
-    if (ykIslemde) return;
-    ykIslemde = true;
-
-    localStorage.setItem('targetUser', document.getElementById('temp_user').value);
-    localStorage.setItem('targetBullets', document.getElementById('temp_bullets').value);
-    localStorage.setItem('isKacir', document.getElementById('chk_kacir').checked ? 'true' : 'false');
-    localStorage.setItem('go_to_kill3', 'true'); // yedek: sayfa 60ms dolmadan yenilenirse kill3'e yine gider
-
-    // 150ms bekle -> "Sığınaktan Çık"a bas -> 60ms bekle -> kill3.php
-    setTimeout(() => {
-        leaveBtn.click();
-        setTimeout(() => {
-            localStorage.removeItem('go_to_kill3');
-            ykIslemde = false;
-            window.location.href = 'https://www.racon.city/m/kill3.php';
-        }, 60);
-    }, 150);
-}
-
-document.getElementById('ykButton').onclick = ykGecisBaslat;
-
-// Enter'a basınca da aynı işlem
-document.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') {
-        e.preventDefault();
-        ykGecisBaslat();
-    }
-});
-                    return true;
-                }
-                return false;
-            }
-
-            if (!ykPaneliAnindaYukle()) {
-                const ykObserver = new MutationObserver((mutations, obs) => {
-                    if (ykPaneliAnindaYukle()) {
-                        obs.disconnect();
-                    }
-                });
-                ykObserver.observe(document.documentElement, { childList: true, subtree: true });
-            }
-
-            setInterval(() => {
-                const tdElements = document.querySelectorAll('td'); let siginakAyarYeri = null;
-                for (let td of tdElements) { if (td.textContent.includes('Sığınakta olduğunuz sürede saldırı almazsınız.')) { siginakAyarYeri = td; break; } }
-                if (siginakAyarYeri && !document.getElementById('yk_siginak_ayari')) {
-                    const ayarDiv = document.createElement('div'); ayarDiv.id = 'yk_siginak_ayari'; ayarDiv.style = "margin: 15px auto; padding: 10px; border: 1px solid #444; background-color: #1a1a1a; width: 350px; border-radius: 5px; text-align: center;";
-                    ayarDiv.innerHTML = `<div style="color: #FFD700; font-weight: bold; margin-bottom: 8px;">Uğur YK - Sığınak Ön Ayarı</div><span style="color: white; font-size: 12px; margin-right: 10px;">Gireceğin Süreyi Seç:</span>
-                        <select id="yk_on_secim" style="width: 100px; padding: 3px; background: #333; color: white; border: 1px solid #666;"><option value="1">1 Saat</option><option value="8">8 Saat</option><option value="9">9 Saat</option><option value="12">12 Saat</option><option value="24">24 Saat</option></select>`;
-                    siginakAyarYeri.insertBefore(ayarDiv, siginakAyarYeri.firstChild);
-                    document.getElementById('yk_on_secim').value = localStorage.getItem('varsayilan_siginak_suresi') || "1";
-                    document.getElementById('yk_on_secim').addEventListener('change', function() { localStorage.setItem('varsayilan_siginak_suresi', this.value); var gercekKutu = document.getElementById('siginak_sure_secici'); if(gercekKutu) { gercekKutu.value = this.value; gercekKutu.dispatchEvent(new Event('change')); } });
-                }
-               // name özelliği sürekli değiştiği için sabit olan size="12" üzerinden yakalıyoruz
-                var input = document.querySelector('input[size="12"]');
-                if (input && !document.getElementById('siginak_sure_secici')) {
-                    input.style.display = 'none'; var select = document.createElement('select'); select.id = 'siginak_sure_secici'; select.style.width = "150px"; select.style.height = "30px";
-                    var kaydedilmisSure = localStorage.getItem('varsayilan_siginak_suresi') || "1";
-                    ["1", "8", "9", "12", "24"].forEach(v => { var opt = document.createElement('option'); opt.value = v; opt.text = v; if(v === kaydedilmisSure) opt.selected = true; select.appendChild(opt); });
-                    select.onchange = function() { input.value = this.value; localStorage.setItem('varsayilan_siginak_suresi', this.value); var onSecimKutusu = document.getElementById('yk_on_secim'); if(onSecimKutusu) onSecimKutusu.value = this.value; };
-                    input.parentNode.insertBefore(select, input.nextSibling); input.value = kaydedilmisSure;
-                }
-            }, 500);
-        }
-
-        if (currentUrl.includes('kill3.php')) {
-            setInterval(() => {
-                let sayacDiv = document.getElementById('sayac-div'); const referansBtn = document.getElementById('btn_saldir') || document.getElementById('btn_kacir');
-                if (!sayacDiv && referansBtn) { sayacDiv = document.createElement('div'); sayacDiv.id = 'sayac-div'; referansBtn.parentNode.insertBefore(sayacDiv, referansBtn); }
-                if (sayacDiv) { sayacDiv.style = "display:block; text-align:center; padding:8px; font-size:20px; font-weight:bold;"; if (sayacDiv.innerHTML !== '<span style="color: #8B0000;">Uğur</span> <span style="color: #FFD700;">YK :)</span>') { sayacDiv.innerHTML = '<span style="color: #8B0000;">Uğur</span> <span style="color: #FFD700;">YK :)</span>'; } }
-            }, 100);
-
-            function bypassButton(id, newText) {
-    const oldBtn = document.getElementById(id);
-    if (oldBtn) {
-        const newBtn = oldBtn.cloneNode(true);
-        newBtn.disabled = false;
-        newBtn.value = newText;
-
-        // YENİ EKLENEN KISIM: Butona fareyle tıklayınca 150ms sonra sığınağa atar
-        newBtn.addEventListener('click', function() {
-            setTimeout(() => { window.location.href = 'https://www.racon.city/m/safe2.php'; }, 150);
-        });
-
-        oldBtn.parentNode.replaceChild(newBtn, oldBtn);
-    }
-}
-setTimeout(() => { bypassButton('btn_saldir', 'SALDIR (YK)'); bypassButton('btn_kacir', 'KAÇIR (YK)'); }, 500);
-
-           const uInput = document.querySelector('input[placeholder="Kullanıcı Adı"]');
-           const bInput = document.querySelector('input[placeholder="Harcanacak Mermi"]');
-            if (uInput) uInput.value = localStorage.getItem('targetUser') || ""; if (bInput) bInput.value = localStorage.getItem('targetBullets') || "";
-
-            const acil = document.createElement('button'); acil.className = "acil-btn"; acil.innerText = "F2 - ACİL SIĞINAK"; acil.onclick = () => window.location.href = 'https://www.racon.city/m/safe2.php'; document.body.appendChild(acil);
-
-           document.addEventListener('keydown', (e) => {
-            if(e.key === 'F2') acil.click();
-            if(e.key === 'Enter') {
-                e.preventDefault();
-                if (localStorage.getItem('isKacir') === 'true') { let kacirBtn = document.getElementById('btn_kacir') || document.querySelector('input[name="kill_button_kacir"]'); if (kacirBtn) kacirBtn.click(); else { let form = document.querySelector('form'); if(form){ let t = document.createElement('input'); t.type = 'submit'; t.name = 'kill_button_kacir'; t.style.display='none'; form.appendChild(t); t.click(); } } }
-                else { let saldirBtn = document.getElementById('btn_saldir'); if (saldirBtn) saldirBtn.click(); else { let form = document.querySelector('form'); if(form) form.submit(); } }
-                setTimeout(() => { window.location.href = 'https://www.racon.city/m/safe2.php'; }, 150);
-            }
-        });
-    }
-// YK panelinin sonradan açılma ihtimaline karşı sayfayı belirli aralıklarla kontrol ediyoruz
-setInterval(() => {
-    // İçerisinde "yk :)" yazan ve henüz işlem yapmadığımız buton/linkleri bul
-    let ykButtons = Array.from(document.querySelectorAll('button, a, div')).filter(el =>
-        el.textContent.trim().includes('yk :)') && !el.dataset.hizliYonlendirme
-    );
-
-    ykButtons.forEach(btn => {
-        btn.dataset.hizliYonlendirme = "true"; // Aynı butona defalarca kod eklememek için işaretliyoruz
-
-        // Tıklama olayını yakala (true parametresi oyunun kendi kodundan önce çalışmasını sağlar)
-        btn.addEventListener('click', function(e) {
-            e.preventDefault(); // Varsayılan tıklama davranışını iptal et
-            e.stopImmediatePropagation(); // Oyunun kendi gecikmeli/kasan kodlarının çalışmasını engelle
-
-            // Hiç beklemeden anında kill3.php sayfasına git
-            window.location.href = 'kill3.php';
-        }, true);
+  function handleResult(r, now, ping) {
+    const prev = state;
+    const L = lower;
+    const st = Object.assign({}, EMPTY, {
+      ok: true, ts: now, active: r.active, endTs: r.endTs, outside: r.outside, inside: r.inside,
+      events: (prev && prev.events) || [], alert: (prev && prev.alert) || null, ping, rate: pollTimes.length,
     });
-}, 500); // Her yarım saniyede bir paneli kontrol et
+    const cOut = new Map(r.outside.map((x) => [L(x.name), x]));
+    const cIn = new Map(r.inside.map((x) => [L(x.name), x]));
+    const meK = L(cfg.me);
+    const items = [];
+    let beepOnly = false, enteredTarget = false;
 
-    if (currentUrl.includes('simulator.php')) {
-        setInterval(() => {
-            const hafizadakiIsimler = JSON.parse(localStorage.getItem('en_iyiler_user_list') || '[]'); if (hafizadakiIsimler.length === 0) return;
-            const simInput = document.querySelector('input[name*="user"]') || document.querySelector('input[type="text"]');
-            if (simInput && !document.getElementById('sim_eniyiler_listesi')) {
-                const datalist = document.createElement('datalist'); datalist.id = 'sim_eniyiler_listesi';
-                hafizadakiIsimler.forEach(isim => { let option = document.createElement('option'); option.value = isim; datalist.appendChild(option); });
-                document.body.appendChild(datalist); simInput.setAttribute('list', 'sim_eniyiler_listesi'); simInput.placeholder = "HEDEF NİCK :)";
-            }
-        }, 200);
-    } // <--- HATA BURADAYDI: Bu süslü parantez eksikti, eklendi.
-// ==========================================================
-// YK GİZLİ SOHBET AĞI (cht2.php ENTEGRASYONU)
-// ==========================================================
-if (window.location.href.includes("cht2.php")) {
+    const prevSince = (prev && prev.since) || {};
+    st.since = {};
+    for (const k of cOut.keys()) if (prevSince[k]) st.since[k] = prevSince[k];
 
-    let isAdmin = false;
-    let isYonetim = false;
-    window.aktifYetki = 0; // Yetkiyi globalde tutuyoruz
+    const canDiff = prev && prev.active && st.active && Array.isArray(prev.outside) && now - prev.ts < 20000;
+    if (canDiff) {
+      const pOut = new Map(prev.outside.map((x) => [L(x.name), x]));
+      const pIn = new Map(prev.inside.map((x) => [L(x.name), x]));
+      const newcomers = [];
+      for (const [k, x] of cOut) if (!pOut.has(k)) newcomers.push({ name: x.name, type: pIn.has(k) ? 'out' : 'on' });
+      const evs = [];
+      newcomers.forEach((n) => { evs.push({ t: now, name: n.name, type: n.type }); st.since[L(n.name)] = now; });
+      for (const [k, x] of pOut) if (!cOut.has(k)) evs.push({ t: now, name: x.name, type: cIn.has(k) ? 'in' : 'off' });
+      for (const [k, x] of pIn) if (!cIn.has(k) && !cOut.has(k)) evs.push({ t: now, name: x.name, type: 'off' });
+      st.events = st.events.concat(evs).slice(-60);
 
-    const userRef = db.ref('lisanslar/' + aktifKullanici);
-
-    // Eğer Firebase'de yetki alanı yoksa otomatik olarak 0 oluşturur
-    userRef.child('yetki').once('value').then((snap) => {
-        if (!snap.exists()) {
-            userRef.update({ yetki: 0 });
-        }
-    });
-
-    // Gerçek zamanlı yetki dinleyici ve Panel Görünürlük Kontrolü
-    userRef.child('yetki').on('value', (snap) => {
-        let y = snap.val() || 0;
-        window.aktifYetki = y;
-        isAdmin = (y === 1);
-        isYonetim = (y === 2);
-
-        // Yetkili paneli görünürlüğünü canlı ayarla
-        const adminPanel = document.getElementById('mod_control_dashboard');
-        if(adminPanel) {
-            adminPanel.style.display = (isAdmin || isYonetim) ? 'block' : 'none';
-        }
-    });
-
-    // 1. Menüye YK Butonunu Ekle
-    const menuTableTr = document.querySelector('table[align="center"] tbody tr');
-    if (menuTableTr && !document.getElementById('yk_chat_btn')) {
-        const ykTd = document.createElement('td');
-        ykTd.height = "20";
-        ykTd.width = "140";
-        ykTd.align = "center";
-        ykTd.className = "select1";
-        ykTd.innerHTML = `<a href="javascript:void(0);" id="yk_chat_btn" style="color:#FFD700; font-weight:bold; text-decoration:none;"><img src="https://r.resimlink.com/vgVLBDA.jpg" width="31" style="vertical-align: middle;"> YK Chat</a>`;
-        menuTableTr.appendChild(ykTd);
-
-        // 2. YK Chat Arayüzünü ve YETKİLİ PANELİNİ Oluştur
-        const ykChatContainer = document.createElement('div');
-        ykChatContainer.id = 'global_msg_wrapper';
-        ykChatContainer.style.display = 'none';
-        ykChatContainer.style.width = '100%';
-
-        // Yönetim Paneli Arayüzü (Sadece yetkililer görecek)
-        const yetkiliPaneliHTML = `
-            <div id="mod_control_dashboard" style="display:none; background:#1a1a1a; padding:8px; border: 1px solid #8B0000; border-radius:5px; margin-bottom:10px;">
-                <div style="margin-bottom:8px;">
-                    <button id="yk_btn_loglar" style="background:#555; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer; font-weight:bold; font-size:11px; margin-right:5px;">??? Logları Gör</button>
-                    <button id="yk_btn_muteler" style="background:#8B0000; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer; font-weight:bold; font-size:11px;">?? Mute Yönetimi</button>
-                </div>
-
-                <div id="yk_log_alani" style="display:none; background:#111; max-height:200px; overflow-y:auto; padding:5px; border:1px solid #444; font-size:11px; border-radius:3px;">
-                    <div style="color:#FFD700; margin-bottom:5px;"><b>Son Silinen Mesajlar</b></div>
-                    <div id="yk_log_liste_icerik" style="color:#ccc;">Yükleniyor...</div>
-                </div>
-
-                <div id="yk_mute_alani" style="display:none; background:#111; padding:5px; border:1px solid #444; font-size:11px; border-radius:3px;">
-                    <div style="color:#FFD700; margin-bottom:5px;"><b>Yeni Mute At</b></div>
-                    <input id="yk_mute_isim_input" placeholder="Kullanıcı Adı" autocomplete="off" style="width:120px; background:#333; color:white; border:1px solid #555; padding:4px; margin-right:3px;">
-                    <input id="yk_mute_saat_input" type="number" placeholder="Saat" style="width:60px; background:#333; color:white; border:1px solid #555; padding:4px; margin-right:3px;">
-                    <button id="yk_mute_onayla_btn" style="background:orange; color:white; border:none; padding:4px 10px; cursor:pointer; border-radius:3px; font-weight:bold;">Mute At</button>
-
-                    <div style="color:#FFD700; margin-top:10px; margin-bottom:5px; border-top:1px solid #333; padding-top:5px;"><b>Aktif Muteler</b></div>
-                    <div id="yk_aktif_muteler_listesi" style="max-height:120px; overflow-y:auto;"></div>
-                </div>
-            </div>
-        `;
-
-        ykChatContainer.innerHTML = yetkiliPaneliHTML + `
-            <!-- Yüzen GIF Seçme Penceresi -->
-            <div id="yk_gif_penceresi" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:rgba(23, 37, 58, 0.98); padding:15px; border-radius:10px; z-index:10000; width:300px; max-height:400px; overflow-y:auto; border:2px solid #667eea;">
-                <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
-                    <h3 style="color:white; margin:0; font-size:16px;">GIF Seç</h3>
-                    <button onclick="document.getElementById('yk_gif_penceresi').style.display='none'" style="background:red; color:white; border:none; border-radius:50%; width:25px; height:25px; cursor:pointer;">X</button>
-                </div>
-                <div id="yk_kullanici_gif_listesi" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;"></div>
-            </div>
-
-            <table width="100%" style="margin-bottom: 5px;">
-                <tr>
-                    <td style="width: 45px;">
-                        <!-- GIF Butonu -->
-                        <button id="yk_chat_gif_btn" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border:none; padding:7px; border-radius:5px; color:white; cursor:pointer; font-weight:bold;">GIF</button>
-                    </td>
-                    <td>
-                        <form id="yk_gonderilenform" onsubmit="return false;">
-                            <input id="yk_chat_input" placeholder=" Mesajınızı Giriniz..." style="width: 100%; height: 30px; background-color:#111; color:#fff; border:1px solid #333; padding-left:5px;" autocomplete="off" />
-                        </form>
-                    </td>
-                </tr>
-                <tr>
-                    <td colspan="2">
-                        <!-- Seçilen GIF Önizleme Ekranı -->
-                        <div id="yk_secilen_gif_onizleme" style="display:none; margin-top:5px; position:relative; width:max-content;">
-                            <img id="yk_secilen_gif_img" src="" style="max-height:80px; border-radius:5px;">
-                            <button onclick="window.iptalYkGif()" style="position:absolute; top:-5px; right:-5px; background:red; color:white; border:none; border-radius:50%; width:20px; height:20px; cursor:pointer; font-size:10px;">X</button>
-                        </div>
-                        <div id="yk_sohbet_yasak" style="margin-top:5px; font-weight:bold;"></div>
-                    </td>
-                </tr>
-            </table>
-            <div style="max-height: 400px; overflow-y: auto; background-color: transparent;">
-                <table id="yk_sonuc" width="100%"></table>
-            </div>
-        `;
-
-        const orjinalSonucTablosu = document.getElementById('sonuc');
-        if (orjinalSonucTablosu) {
-            orjinalSonucTablosu.parentNode.insertBefore(ykChatContainer, orjinalSonucTablosu);
-        }
-
-        // ==========================================
-        // GİF FONKSİYONLARI BAŞLANGIÇ
-        // ==========================================
-
-        // Firebase'den GIF'leri Çek (Sadece Okuma)
-        db.ref('yk_chat/gifler').on('value', snap => {
-            const kullaniciListe = document.getElementById('yk_kullanici_gif_listesi');
-            if(!kullaniciListe) return;
-            let userHtml = '';
-            snap.forEach(child => {
-                let v = child.val();
-                userHtml += `<div onclick="window.secYkGif('${v.url}')" style="cursor:pointer; border-radius:5px; overflow:hidden; border:2px solid transparent;">
-                    <img src="${v.url}" style="width:100%; height:80px; object-fit:cover;">
-                </div>`;
-            });
-            kullaniciListe.innerHTML = userHtml || '<span style="color:#888;">Henüz GIF eklenmemiş.</span>';
-        });
-
-        // GIF Penceresini Açma
-        document.getElementById('yk_chat_gif_btn').addEventListener('click', () => {
-            document.getElementById('yk_gif_penceresi').style.display = 'block';
-        });
-
-        // GIF Seçme, İptal ve Global Fonksiyonlar
-        window.ykSeciliGifUrl = null;
-        window.secYkGif = function(url) {
-            window.ykSeciliGifUrl = url;
-            document.getElementById('yk_secilen_gif_img').src = url;
-            document.getElementById('yk_secilen_gif_onizleme').style.display = 'block';
-            document.getElementById('yk_gif_penceresi').style.display = 'none';
-        };
-        window.iptalYkGif = function() {
-            window.ykSeciliGifUrl = null;
-            document.getElementById('yk_secilen_gif_img').src = '';
-            document.getElementById('yk_secilen_gif_onizleme').style.display = 'none';
-        };
-
-        // ==========================================
-        // YETKİLİ PANELİ FONKSİYONLARI BAŞLANGIÇ
-        // ==========================================
-
-        // Logları Göster/Gizle
-        document.getElementById('yk_btn_loglar').addEventListener('click', () => {
-            const logAlani = document.getElementById('yk_log_alani');
-            const muteAlani = document.getElementById('yk_mute_alani');
-            muteAlani.style.display = 'none';
-            logAlani.style.display = logAlani.style.display === 'none' ? 'block' : 'none';
-
-            if(logAlani.style.display === 'block') {
-                db.ref('yk_chat/silinen_loglar').limitToLast(50).once('value', snap => {
-                    let html = '';
-                    let loglar = [];
-                    snap.forEach(child => { loglar.push(child.val()); });
-                    // Yeniden eskiye sırala
-                    loglar.reverse().forEach(log => {
-                        html += `<div style="border-bottom:1px dashed #333; padding:5px 0;">
-                            <span style="color:red; font-weight:bold;">${log.silen_yetkili}</span> sildi (${log.tarihi}):<br>
-                            <span style="color:#FFD700;">${log.mesajin_sahibi}:</span> <span style="color:#aaa;">${log.silinen_mesaj}</span>
-                        </div>`;
-                    });
-                    document.getElementById('yk_log_liste_icerik').innerHTML = html || 'Henüz silinen bir log bulunamadı.';
-                });
-            }
-        });
-
-        // Mute Panelini Göster/Gizle
-        document.getElementById('yk_btn_muteler').addEventListener('click', () => {
-            const logAlani = document.getElementById('yk_log_alani');
-            const muteAlani = document.getElementById('yk_mute_alani');
-            logAlani.style.display = 'none';
-            muteAlani.style.display = muteAlani.style.display === 'none' ? 'block' : 'none';
-        });
-
-        // Yeni Mute Atma İşlemi
-        document.getElementById('yk_mute_onayla_btn').addEventListener('click', () => {
-            let isim = document.getElementById('yk_mute_isim_input').value.trim();
-            let saat = parseFloat(document.getElementById('yk_mute_saat_input').value);
-
-            if(isim && saat > 0) {
-                let bitisZamani = Date.now() + (saat * 60 * 60 * 1000);
-                db.ref('yk_chat/muteler/' + isim).set({
-                    bitisTarihi: bitisZamani,
-                    cezayi_veren: aktifKullanici,
-                    tarihi: new Date().toLocaleString('tr-TR')
-                }).then(() => {
-                    document.getElementById('yk_mute_isim_input').value = '';
-                    document.getElementById('yk_mute_saat_input').value = '';
-                });
-            } else {
-                alert("Lütfen geçerli bir kullanıcı adı ve saat değeri girin!");
-            }
-        });
-
-        // Aktif Muteleri Canlı Dinle ve Göster
-        db.ref('yk_chat/muteler').on('value', snap => {
-            const liste = document.getElementById('yk_aktif_muteler_listesi');
-            if(!liste) return;
-
-            let html = '';
-            const simdi = Date.now();
-
-            snap.forEach(child => {
-                let isim = child.key;
-                let v = child.val();
-                let kalanMs = v.bitisTarihi - simdi;
-
-                if(kalanMs > 0) {
-                    let kalanDk = Math.ceil(kalanMs / 60000);
-                    let sureGosterimi = kalanDk > 60 ? (kalanDk/60).toFixed(1) + ' saat' : kalanDk + ' dk';
-
-                    html += `
-                    <div style="border-bottom:1px solid #333; padding:6px 0;">
-                        <span style="color:#FFD700; font-weight:bold;">${isim}</span>
-                        <span style="color:#888;">(Kalan: <span style="color:#ff4444;">${sureGosterimi}</span>)</span>
-                        <button onclick="window.kaldirYkMute('${isim}')" style="background:#ff4444; color:white; border:none; padding:3px 8px; border-radius:3px; cursor:pointer; font-weight:bold; font-size:10px; margin-left:8px;">Kaldır</button>
-                    </div>`;
-                } else {
-                    // Süresi dolan muteyi veritabanından temizle
-                    db.ref('yk_chat/muteler/' + isim).remove();
-                }
-            });
-            liste.innerHTML = html || '<span style="color:#888; font-style:italic;">Şu an kimse susturulmamış.</span>';
-        });
-
-        // ==========================================
-        // YETKİLİ PANELİ FONKSİYONLARI BİTİŞ
-        // ==========================================
-
-        // 3. Tıklama ile Geçiş (Orijinal <-> YK)
-        document.getElementById('yk_chat_btn').addEventListener('click', function() {
-            const oChat = document.getElementById('sonuc');
-            const oForms = document.querySelectorAll('form:not(#yk_gonderilenform)');
-            const oInputTimeout = document.getElementById('input_timeout');
-            const oAlert = document.getElementById('alert');
-            const oGidenVeri = document.getElementById('gidenveri1');
-
-            if (ykChatContainer.style.display === 'none') {
-                // Orijinalleri Gizle, YK Chat Aç
-                if(oChat) oChat.style.display = 'none';
-                oForms.forEach(f => f.style.display = 'none');
-                if(oInputTimeout) oInputTimeout.style.display = 'none';
-                if(oAlert) oAlert.style.display = 'none';
-                if(oGidenVeri) oGidenVeri.style.display = 'none';
-
-                ykChatContainer.style.display = 'block';
-                this.style.color = '#ff4444';
-            } else {
-                // Orijinalleri Aç, YK Chat Gizle
-                if(oChat) oChat.style.display = 'table';
-                oForms.forEach(f => f.style.display = 'block');
-                if(oInputTimeout) oInputTimeout.style.display = 'block';
-                if(oAlert) oAlert.style.display = 'block';
-                if(oGidenVeri) oGidenVeri.style.display = 'block';
-
-                ykChatContainer.style.display = 'none';
-                this.style.color = '#FFD700';
-            }
-        });
-
-        /// 4. Firebase Chat İşlemleri
-        const chatRef = db.ref('yk_chat/mesajlar');
-
-        window.sonMesajGondermeZamani = 0; // 5 Saniye kontrolü için sayaç
-
-        function ykMesajGonder() {
-            const input = document.getElementById('yk_chat_input');
-            const val = input.value.trim();
-            if (!val && !window.ykSeciliGifUrl) return;
-
-// --- 5 SANİYE BEKLEME (SPAM) KONTROLÜ ---
-if (!isAdmin && !isYonetim) {
-    // Sadece admin VEYA yönetim DEĞİLSE bu zaman kontrolünü yap
-    const simdi = Date.now();
-    if (simdi - window.sonMesajGondermeZamani < 5000) {
-        let kalanSaniye = Math.ceil((5000 - (simdi - window.sonMesajGondermeZamani)) / 1000);
-        document.getElementById('yk_sohbet_yasak').innerHTML = `<font color="red"> Lütfen ${kalanSaniye} saniye bekleyin.</font>`;
-        return; // İşlemi durdur
+      for (const n of newcomers) {
+        const k = L(n.name);
+        if (k === meK) continue;
+        const rule = ruleOf(n.name);
+        if (rule && rule.hide) continue;
+        if (rule && rule.alarm && (n.type === 'out' || cfg.alarmLogin)) items.push({ name: n.name, kind: 'target', type: n.type });
+        else if (cfg.guard && meK && cOut.has(meK) && (n.type === 'out' || cfg.guardLogin)) items.push({ name: n.name, kind: 'guard', type: n.type });
+        else if (cfg.soundAll) beepOnly = true;
+      }
+      evs.forEach((e) => { if (e.type === 'in') { const rule = ruleOf(e.name); if (rule && rule.alarm && !rule.hide) enteredTarget = true; } });
     }
-}
 
-// Önce kullanıcının Mute (Susturulma) durumunu kontrol et
-db.ref('yk_chat/muteler/' + aktifKullanici).once('value').then(snap => {
-    if (snap.exists()) {
-        let bitis = snap.val().bitisTarihi;
-        if (Date.now() < bitis) {
-            let kalanDk = Math.ceil((bitis - Date.now()) / 60000);
-            document.getElementById('yk_sohbet_yasak').innerHTML = `<font color="red">Sohbet yasağı aldınız. Yeniden mesaj gönderebilmek için ${kalanDk} dakika beklemelisiniz.</font>`;
-            input.value = "";
-            return;
-        } else {
-            // Süre dolmuş, cezayı kaldır ve gönder
-            db.ref('yk_chat/muteler/' + aktifKullanici).remove();
-            document.getElementById('yk_sohbet_yasak').innerHTML = "";
-            gonderIsleminiTamamla();
-        }
+    // hedefler + ben için durum takibi
+    const watch = new Set(cfg.rules.filter((x) => x.alarm && !x.hide).map((x) => L(x.name)));
+    if (meK) watch.add(meK);
+    st.track = {};
+    for (const k of watch) {
+      const s = cOut.has(k) ? 'out' : cIn.has(k) ? 'in' : 'off';
+      const old = prev && prev.track && prev.track[k];
+      st.track[k] = old && old.st === s ? old : { st: s, t: old ? now : 0 };
+    }
+
+    if (items.length) st.alert = { id: now, items };
+
+    const sig = [st.active, r.outside.map((x) => x.name).join(','), r.inside.map((x) => x.name).join(',')].join('|');
+    const changed = sig !== lastSig || items.length > 0;
+    lastSig = sig;
+    state = st;
+    if (changed || now - lastSave > 1000) { saveKey('state', st); lastSave = now; }
+    if (changed) render();
+
+    if (items.length) {
+      const hasTarget = items.some((i) => i.kind === 'target');
+      const label = (i) => (i.kind === 'guard' ? 'Arkanda ' + i.name + ' çıktı' : i.name + (i.type === 'on' ? ' online oldu' : ' sığınaktan çıktı'));
+      const text = items.slice(0, 3).map(label).join('. ');
+      startAlarm(st.alert.id, hasTarget ? 'target' : 'guard', text);
+      notify(hasTarget ? '🚨 Hedef çıktı!' : '🛡 Arkanda biri çıktı!', items.map(label).join(' · '));
+    } else if (beepOnly) beep();
+    else if (enteredTarget) beep();
+
+    // erişim bitmek üzere uyarısı (tek sefer)
+    if (st.active && st.endTs) {
+      const left = st.endTs - now / 1000;
+      if (left < 300 && left > 0 && load('warnedEnd', 0) !== st.endTs) {
+        GM_setValue('warnedEnd', JSON.stringify(st.endTs));
+        beep();
+        notify('⏳ Takip erişimi bitiyor', 'Kalan: ' + hms(Math.floor(left)));
+      }
+    }
+  }
+
+  async function poll() {
+    if (polling) return;
+    polling = true;
+    const t0 = performance.now();
+    const now = Date.now();
+    try {
+      const url = new URL(cfg.url, location.origin);
+      url.searchParams.set('_t', String(now));
+      const res = await fetch(url.href, { credentials: 'same-origin', cache: 'no-store' });
+      if (!res.ok) { const e = new Error('HTTP ' + res.status); e.status = res.status; throw e; }
+      const html = decode(await res.arrayBuffer(), res.headers.get('content-type'));
+      const r = parseTakip(html);
+      const ms = performance.now() - t0;
+      pingEMA = pingEMA ? pingEMA * 0.8 + ms * 0.2 : ms;
+      pollTimes.push(now);
+      while (pollTimes.length && pollTimes[0] < now - 1000) pollTimes.shift();
+      errCount = 0; backoff = 0;
+      handleResult(r, now, Math.round(pingEMA));
+    } catch (e) {
+      errCount++;
+      const s = e && e.status;
+      backoff = (s === 429 || s === 403 || s === 503 || s === 520 || s === 522)
+        ? Math.min(30000, 2000 * Math.pow(2, Math.min(errCount, 4)))
+        : Math.min(10000, 500 * Math.pow(2, Math.min(errCount, 5)));
+      const msg = String((e && e.message) || e) + ' · ' + (backoff / 1000).toFixed(1) + ' sn beklenip yeniden denenecek';
+      state = Object.assign({}, EMPTY, state || {}, { ok: false, err: msg });
+      const n = Date.now();
+      if (n - lastSave > 1000) { saveKey('state', state); lastSave = n; }
+      render();
+    } finally {
+      polling = false;
+    }
+  }
+
+  function electLeader(now) {
+    const l = load('leader', null);
+    const was = leader;
+    if (!l || l.id === ME || now - l.ts > 5000) {
+      if (!l || l.id !== ME || now - lastBeat > 1000) { GM_setValue('leader', JSON.stringify({ id: ME, ts: now })); lastBeat = now; }
+      leader = true;
+    } else leader = false;
+    if (!was && leader) { const s = GM_getValue('state') || ''; rawState = s; try { state = s ? JSON.parse(s) : state; } catch (e) {} }
+  }
+  function syncFromStore() {
+    if (!leader) {
+      const s = GM_getValue('state') || '';
+      if (s !== rawState) { rawState = s; try { state = s ? JSON.parse(s) : null; } catch (e) {} render(); }
+    }
+    const c = GM_getValue('cfg') || '';
+    if (c !== rawCfg) { rawCfg = c; try { cfg = Object.assign({}, DEF, JSON.parse(c)); } catch (e) {} render(); renderRules(); syncSettings(); }
+    const a = GM_getValue('ack') || '';
+    if (a !== rawAck) { rawAck = a; try { ack = JSON.parse(a); } catch (e) {} if (state && state.alert && ack === state.alert.id) stopAlarm(); render(); }
+  }
+  function tick() {
+    const now = Date.now();
+    if (now - lastLeaderChk >= 500) { lastLeaderChk = now; electLeader(now); }
+    if (now - lastSync >= (leader ? 500 : 250)) { lastSync = now; syncFromStore(); }
+    if (leader && !polling && !cfg.paused) {
+      const wait = Math.max(100, +cfg.interval || 500, backoff);
+      if (now - lastPollStart >= wait) { lastPollStart = now; poll(); }
+    }
+  }
+  function startTicker(fn, ms) {
+    let fb = false;
+    const useInterval = () => { if (!fb) { fb = true; setInterval(fn, ms); } };
+    try {
+      const blob = new Blob(['setInterval(function(){postMessage(0)},' + ms + ')'], { type: 'text/javascript' });
+      const w = new Worker(URL.createObjectURL(blob));
+      w.onmessage = fn;
+      w.onerror = () => { try { w.terminate(); } catch (e) {} useInterval(); };
+    } catch (e) { useInterval(); }
+  }
+  addEventListener('pagehide', () => { if (leader) GM_setValue('leader', JSON.stringify({ id: ME, ts: 0 })); });
+
+  // ───────────── Arayüz ─────────────
+  function el(tag, props, ...kids) {
+    const e = document.createElement(tag);
+    if (props) for (const k in props) {
+      const v = props[k];
+      if (k === 'class') e.className = v;
+      else if (k === 'style') e.style.cssText = v;
+      else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+      else if (k in e) e[k] = v;
+      else e.setAttribute(k, v);
+    }
+    for (const c of kids.flat()) if (c != null && c !== false) e.append(c.nodeType ? c : document.createTextNode(c));
+    return e;
+  }
+
+  // Oyunun kendi teması: lacivert zemin, mavi gradyanlı başlık çubukları,
+  // serif küçük-büyük harf başlıklar, yeşil çerçeveli erişim kutusu.
+  const css = `
+:host{all:initial}
+*{box-sizing:border-box;font-family:Lato,"Segoe UI",system-ui,-apple-system,Roboto,sans-serif}
+.panel{position:fixed;width:330px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;
+  background:#0c1830;
+  color:#e6ebf6;border:1px solid #223559;border-radius:10px;
+  box-shadow:0 14px 40px rgba(0,0,0,.6);
+  font-size:13px;user-select:none;opacity:var(--op,1);transition:border-color .2s}
+.panel.alert{border-color:#ff4d5e;animation:pulse .7s infinite alternate}
+.panel.guardOn{border-color:#d8a23a}
+@keyframes pulse{from{box-shadow:0 0 0 0 rgba(255,77,94,0),0 14px 40px rgba(0,0,0,.6)}to{box-shadow:0 0 26px 6px rgba(255,77,94,.75),0 14px 40px rgba(0,0,0,.6)}}
+
+/* başlık çubuğu (oyundaki "SIĞINAK TAKİBİ" çubuğu gibi) */
+.hd{display:flex;align-items:center;gap:7px;padding:9px 10px;cursor:grab;touch-action:none;
+  background:linear-gradient(90deg,#0d1a33 0%,#1a3563 50%,#0d1a33 100%);
+  border-bottom:1px solid #223559}
+.hd:active{cursor:grabbing}
+.dot{position:relative;width:10px;height:10px;border-radius:50%;background:#7b8196;flex:none}
+.dot.ok{background:#3ddc84}.dot.stale{background:#ffb84d}.dot.bad{background:#ff4d5e}
+.dot.ok::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:2px solid #3ddc84;opacity:0;animation:ring 1.6s infinite}
+@keyframes ring{0%{transform:scale(.6);opacity:.8}100%{transform:scale(1.5);opacity:0}}
+.ttl{font-family:Cinzel,Georgia,"Times New Roman",serif;font-weight:700;letter-spacing:1.2px;font-size:13px;text-transform:uppercase;color:#dfe7f7;text-shadow:0 1px 2px rgba(0,0,0,.6)}
+.chip{background:rgba(0,0,0,.35);border:1px solid #2a4170;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;color:#cbd6ee}
+.sp{flex:1}
+button{background:#17294d;color:#dbe4f6;border:1px solid #2c4377;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:12px;transition:background .15s}
+button:hover{background:#244274}
+.hd button{padding:2px 7px}
+.panel.min{width:auto;border-radius:999px;background:#0c1830}
+.panel.min .hd{border-bottom:none;border-radius:999px;background:#0c1830;padding:7px 9px}
+.panel.min .bd,.panel.min .ttl,.panel.min .hbtn{display:none}
+.bd{padding:8px;overflow:auto;scrollbar-width:thin;scrollbar-color:#2a4170 transparent}
+
+/* alarm bandı */
+.ban{display:none;background:linear-gradient(135deg,#6b1220,#3b0b14);border:1px solid #ff4d5e;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-weight:700}
+.ban.on{display:flex;align-items:center;gap:8px}
+.ban span{flex:1;word-break:break-word}
+
+/* ben kartı */
+.me{display:flex;align-items:center;gap:6px;background:#0f1f3d;border:1px solid #1f3257;border-radius:8px;padding:6px 9px;margin-bottom:8px;font-size:12px}
+.me.out{border-color:#b98a2f;background:rgba(216,162,58,.1)}
+.me .st{font-weight:900}
+.me .st.out{color:#ffb84d}.me .st.in{color:#3ddc84}.me .st.off{color:#8a91a8}
+
+/* Takip Erişimi kutusu: oyundaki yeşil çerçeveli kutu */
+.info{color:#9fb0cf;font-size:11.5px;margin-bottom:8px;line-height:1.45;text-align:center;
+  background:#0f1f3d;border:1px solid #1f3257;border-radius:8px;padding:8px}
+.info b{color:#e6ebf6}.info .warn{color:#ffb84d}.info .bad{color:#ff6b7b}
+.info.okbox{background:linear-gradient(160deg,#10331f,#0a1f14);border:1px solid #3ddc84;border-radius:12px;
+  box-shadow:0 0 14px rgba(61,220,132,.18)}
+.info .acc{font-size:12.5px;color:#e6f7ec}
+.info .clk{font-family:Lato,"Segoe UI",sans-serif;font-weight:900;font-size:26px;letter-spacing:1.5px;color:#3ddc84;line-height:1.25;text-shadow:0 0 10px rgba(61,220,132,.35)}
+.info .clk.bad{color:#ff6b7b;text-shadow:none}
+.info .sub{font-size:11px;color:#a8c5b3}
+
+/* bölümler */
+.sec{margin-top:8px;background:#0e1c38;border:1px solid #1d3055;border-radius:8px;overflow:hidden}
+.sh{display:flex;align-items:center;gap:7px;padding:7px 10px;font-size:12.5px;font-weight:700;color:#e6ebf6;
+  background:linear-gradient(90deg,#0d1a33,#16305c 50%,#0d1a33);border-bottom:1px solid #1d3055}
+.sh.click{cursor:pointer}
+.sh .ic{font-weight:900;font-size:14px;line-height:1}
+.sh .ic.x{color:#ff3b3b}.sh .ic.v{color:#35c25a}.sh .ic.t{color:#ffcc00}.sh .ic.h{color:#7fb8ff}
+.pill{background:rgba(255,255,255,.12);color:#fff;border-radius:999px;padding:0 7px;font-size:11px}
+.pill.red{background:#d63b4a}.pill.green{background:#1fae6b}
+.list{display:flex;flex-direction:column;gap:1px;padding:4px}
+.row{display:flex;align-items:center;gap:7px;padding:4px 6px;border-radius:6px;transition:background .15s}
+.row:hover{background:rgba(255,255,255,.07)}
+.row.dim{opacity:.75}
+.row.me{background:rgba(216,162,58,.12);border:none;margin:0;padding:4px 6px}
+.row.new{animation:flash 1s 3}
+@keyframes flash{0%,100%{background:rgba(255,77,94,.28)}50%{background:rgba(255,77,94,.6)}}
+.av{width:22px;height:22px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.4)}
+.nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:none;font-weight:700;color:#f1f4fb;max-width:125px}
+.nm:hover{text-decoration:underline}
+.bdg{display:flex;gap:4px;align-items:center;flex:1;min-width:0}
+.tag{font-size:10px;font-weight:900;padding:0 6px;border-radius:999px;background:#1d3055;color:#cdd8ee;white-space:nowrap;max-width:70px;overflow:hidden;text-overflow:ellipsis}
+.tag.me{background:#ffb84d;color:#2a1c00}
+.tm{color:#8c9bba;font-size:11px;white-space:nowrap}
+.tm.hot{color:#ff8a97;font-weight:700}
+.acts{display:none;gap:3px}
+.row:hover .acts{display:flex}
+.row:hover .tm{display:none}
+.acts button{padding:0 5px;font-size:11px}
+.empty{color:#6f7f9f;padding:6px 6px;font-size:12px}
+
+/* küçük liste: oyundaki "isim , isim , isim" görünümü */
+.names{padding:4px 6px 6px;line-height:1.75;font-size:12.5px;color:#cfd8ec;word-break:break-word}
+.cn{color:#f1f4fb;text-decoration:none;font-weight:700;cursor:pointer;border-radius:4px;padding:0 1px}
+.cn:hover{text-decoration:underline}
+.cn.me{color:#ffb84d}
+.cn.new{animation:flash 1s 3}
+.names.dim .cn{font-weight:400;color:#bcc8e0}
+.sep{color:#6f7f9f;margin:0 1px}
+
+/* sağ tık menüsü */
+.ctx{display:none;position:fixed;z-index:10;min-width:150px;background:#0c1830;border:1px solid #2c4377;border-radius:8px;
+  box-shadow:0 10px 30px rgba(0,0,0,.6);padding:4px}
+.ctx.on{display:block}
+.ctx .ctxh{padding:4px 8px;font-family:Cinzel,Georgia,serif;font-size:12px;font-weight:700;color:#8fa2c8;border-bottom:1px solid #1d3055;margin-bottom:3px}
+.ctx button{display:block;width:100%;text-align:left;border:none;background:none;padding:5px 8px;border-radius:5px}
+.ctx button:hover{background:#244274}
+.badge{font-size:10px;font-weight:900;padding:1px 7px;border-radius:999px;white-space:nowrap}
+.badge.out{background:rgba(255,77,94,.2);color:#ff8a97}
+.badge.in{background:rgba(61,220,132,.18);color:#5eeaa2}
+.badge.off{background:rgba(255,255,255,.1);color:#9aa8c4}
+.evt{font-size:11.5px;color:#a9b6d0;line-height:1.55;padding:6px 10px}
+.evt .o{color:#ff8a97}.evt .i{color:#5eeaa2}.evt .f{color:#7f8da9}.evt .n{color:#7fb8ff}
+
+/* ayarlar */
+.set{display:none;margin-top:8px;background:#0e1c38;border:1px solid #1d3055;border-radius:8px;padding:8px 10px}
+.set.on{display:block}
+.set label{display:flex;align-items:center;gap:7px;margin:5px 0;color:#c9d3e8;font-size:12px}
+.set input[type=text],.set input[type=number],.set select,.set textarea{background:#08122a;border:1px solid #2a4170;color:#e6ebf6;border-radius:6px;padding:3px 6px;font-size:12px;min-width:0}
+.set input[type=color]{width:26px;height:22px;padding:0;border:none;background:none}
+.set h4{margin:10px 0 3px;font-family:Cinzel,Georgia,serif;font-size:11px;color:#8fa2c8;letter-spacing:1px}
+.speed{display:flex;gap:4px;flex-wrap:wrap;margin:4px 0}
+.speed button.on{background:#2f5fd0;border-color:#4a7bff;color:#fff}
+.add{display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin:6px 0}
+.add input[type=text]{flex:1;min-width:90px}
+.rr{display:flex;align-items:center;gap:5px;margin:3px 0}
+.rr .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
+.hint{color:#6f7f9f;font-size:11px;line-height:1.4}
+.tools{display:flex;gap:5px;flex-wrap:wrap;margin:6px 0}
+textarea{width:100%;height:54px;resize:vertical;user-select:text}
+`;
+
+  const host = el('div', { id: 'mmr-host', style: 'all:initial;position:fixed;top:0;left:0;z-index:2147483647' });
+  const root = host.attachShadow({ mode: 'open' });
+  // Stil: önce constructable stylesheet (sayfa CSP'sinden etkilenmez), olmazsa <style>
+  try {
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(css);
+    root.adoptedStyleSheets = [sheet];
+  } catch (e) {
+    root.append(el('style', null, css));
+  }
+  // Oyun temasındaki yazı tipleri (engellenirse yedek yazı tipleri kullanılır)
+  try {
+    root.append(el('link', { rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Lato:wght@400;700;900&display=swap' }));
+  } catch (e) {}
+
+  const dot = el('span', { class: 'dot' });
+  const speedChip = el('span', { class: 'chip', title: 'Saniyedeki tarama sayısı · ortalama yanıt süresi' }, '—');
+  const btnPause = el('button', { class: 'hbtn', title: 'Taramayı duraklat/başlat', onclick: (e) => { e.stopPropagation(); cfg.paused = !cfg.paused; commitCfg(); } }, '⏸');
+  const btnSet = el('button', { class: 'hbtn', title: 'Ayarlar', onclick: (e) => { e.stopPropagation(); setBox.classList.toggle('on'); if (setBox.classList.contains('on')) { renderRules(); syncSettings(); } } }, '⚙');
+  const btnMin = el('button', { title: 'Küçült / Aç  (Alt+R)', onclick: (e) => { e.stopPropagation(); toggleMin(); } }, '–');
+  const hd = el('div', { class: 'hd' }, dot, el('span', { class: 'ttl' }, 'Sığınak Radar'), speedChip, el('span', { class: 'sp' }), btnPause, btnSet, btnMin);
+
+  const ban = el('div', { class: 'ban' });
+  const meCard = el('div', { class: 'me' });
+  const info = el('div', { class: 'info' });
+
+  const tgPill = el('span', { class: 'pill' }, '0');
+  const tgList = el('div', { class: 'list' });
+  const tgSec = el('div', { class: 'sec' }, el('div', { class: 'sh' }, el('span', { class: 'ic t' }, '★'), 'Hedefler', tgPill), tgList);
+
+  const outPill = el('span', { class: 'pill red' }, '0');
+  const sortBtn = el('button', { style: 'margin-left:auto;padding:0 6px;font-size:10px', title: 'Sıralama', onclick: () => { cfg.sort = cfg.sort === 'new' ? 'level' : 'new'; commitCfg(); } });
+  const outList = el('div', { class: 'list' });
+  const outSec = el('div', { class: 'sec' }, el('div', { class: 'sh' }, el('span', { class: 'ic x' }, '✖'), 'Sığınak Dışındakiler', outPill, sortBtn), outList);
+
+  const inPill = el('span', { class: 'pill green' }, '0');
+  const inArrow = el('span', { style: 'font-size:10px;color:#8fa2c8' }, '▾');
+  const inList = el('div', { class: 'list' });
+  const inSec = el('div', { class: 'sec' }, el('div', { class: 'sh click', onclick: () => { cfg.inOpen = !cfg.inOpen; commitCfg(); } }, el('span', { class: 'ic v' }, '✔'), 'Sığınaktakiler', inPill, el('span', { class: 'sp' }), inArrow), inList);
+
+  const evBody = el('div', { class: 'evt' });
+  const evArrow = el('span', { style: 'font-size:10px;color:#8fa2c8' }, '▾');
+  const evSec = el('div', { class: 'sec' }, el('div', { class: 'sh click', onclick: () => { cfg.evOpen = !cfg.evOpen; commitCfg(); } }, el('span', { class: 'ic h' }, '⏱'), 'Son Hareketler', el('span', { class: 'sp' }), evArrow), evBody);
+
+  // Ayar paneli
+  const fUrl = el('input', { type: 'text', style: 'flex:1', onchange: () => { cfg.url = fUrl.value.trim() || DEF.url; commitCfg(); } });
+  const fInt = el('input', { type: 'number', min: 100, step: 50, style: 'width:70px', onchange: () => { cfg.interval = Math.max(100, +fInt.value || 500); commitCfg(); } });
+  const fMe = el('input', { type: 'text', style: 'flex:1', placeholder: 'oyundaki adın', onchange: () => { cfg.me = fMe.value.trim(); commitCfg(); } });
+  const fOp = el('input', { type: 'range', min: 0.4, max: 1, step: 0.05, style: 'flex:1', oninput: () => { cfg.opacity = +fOp.value; panel.style.setProperty('--op', cfg.opacity); }, onchange: () => commitCfg() });
+  const speedBox = el('div', { class: 'speed' });
+  const mkCb = (key, text) => { const c = el('input', { type: 'checkbox', onchange: () => { cfg[key] = c.checked; commitCfg(); } }); c._key = key; return [c, el('label', null, c, text)]; };
+  const cbs = [
+    mkCb('guard', '🛡 Koruma: ben dışardayken sığınaktan çıkan HERKES için alarm'),
+    mkCb('guardLogin', '🛡 …online olanlar için de'),
+    mkCb('alarmLogin', '🎯 Hedef online olunca da alarm'),
+    mkCb('speak', '🗣 Alarmda ismi sesli söyle'),
+    mkCb('repeat', '🔁 Alarm Sustur\'a basana kadar tekrar etsin'),
+    mkCb('soundAll', '🔔 Her çıkışta kısa bip (gizli olmayanlar)'),
+    mkCb('notif', '🖥 Masaüstü bildirimi'),
+    mkCb('showInside', '🏠 Sığınaktakileri göster'),
+    mkCb('compact', '▭ Küçük liste (oyundaki gibi virgüllü isimler)'),
+    mkCb('mute', '🔇 Sesi kapat'),
+  ];
+  const nName = el('input', { type: 'text', placeholder: 'İsim (virgülle birden çok)' });
+  const nColor = el('input', { type: 'color', value: '#ffcc00' });
+  const nAlarm = el('input', { type: 'checkbox', checked: true });
+  const nHide = el('input', { type: 'checkbox' });
+  const rulesBox = el('div');
+  const ioBox = el('textarea', { placeholder: 'Kuralları yedeklemek/aktarmak için' });
+  const setBox = el('div', { class: 'set' },
+    el('h4', null, 'TARAMA HIZI'),
+    speedBox,
+    el('label', null, 'Özel (ms):', fInt, el('span', { class: 'hint' }, 'en düşük 100')),
+    el('div', { class: 'hint' }, 'Yanıt, aralıktan yavaşsa hız kendiliğinden düşer. Sunucu hata verirse otomatik beklenir.'),
+    el('h4', null, 'BEN'),
+    el('label', null, 'Adım:', fMe),
+    el('div', { class: 'hint' }, 'Listede ismin üstüne gelip 👤\'e basarak da seçebilirsin.'),
+    el('h4', null, 'UYARILAR'),
+    cbs.map((x) => x[1]),
+    el('div', { class: 'tools' },
+      el('button', { onclick: () => { const a = audio(); if (a) a.resume(); siren(); say('Test. Amiral sığınaktan çıktı'); } }, '🔊 Hedef alarmı'),
+      el('button', { onclick: () => { const a = audio(); if (a) a.resume(); guardSound(); say('Arkanda biri çıktı'); } }, '🛡 Koruma alarmı'),
+      el('button', { onclick: () => { cfg.snoozeUntil = Date.now() + 5 * 60000; commitCfg(); } }, '😴 5 dk sessiz'),
+      el('button', { onclick: () => { cfg.snoozeUntil = 0; commitCfg(); } }, 'Sessizi kaldır')),
+    el('h4', null, 'GÖRÜNÜM'),
+    el('label', null, 'Saydamlık:', fOp),
+    el('label', null, 'Sayfa:', fUrl),
+    el('h4', null, 'İSİM KURALLARI'),
+    el('div', { class: 'add' }, nName, nColor,
+      el('label', { style: 'margin:0' }, nAlarm, '🔔'), el('label', { style: 'margin:0' }, nHide, '🚫'),
+      el('button', { onclick: addRule }, 'Ekle')),
+    el('div', { class: 'hint' }, '🔔 = hedef (çıkınca alarm, panelde takip edilir) · 🚫 = listede gösterme · renk = ismin rengi'),
+    rulesBox,
+    el('h4', null, 'YEDEK'),
+    ioBox,
+    el('div', { class: 'tools' },
+      el('button', { onclick: () => { ioBox.value = JSON.stringify({ rules: cfg.rules, me: cfg.me }); } }, 'Dışa aktar'),
+      el('button', { onclick: () => { try { const o = JSON.parse(ioBox.value); if (Array.isArray(o.rules)) cfg.rules = o.rules; if (typeof o.me === 'string') cfg.me = o.me; commitCfg(); renderRules(); syncSettings(); } catch (e) { ioBox.value = 'Geçersiz veri'; } } }, 'İçe aktar')));
+
+  const body = el('div', { class: 'bd' }, ban, meCard, info, tgSec, outSec, inSec, evSec, setBox);
+  const panel = el('div', { class: 'panel', lang: 'tr' }, hd, body);
+  root.append(panel);
+
+  function commitCfg() { saveKey('cfg', cfg); render(); }
+  function syncSettings() {
+    fUrl.value = cfg.url; fInt.value = cfg.interval; fMe.value = cfg.me; fOp.value = cfg.opacity;
+    cbs.forEach(([c]) => { c.checked = !!cfg[c._key]; });
+    renderSpeed();
+  }
+  function renderSpeed() {
+    speedBox.textContent = '';
+    [[100, '⚡ 100ms'], [250, '250ms'], [500, '500ms'], [1000, '1sn'], [3000, '3sn']].forEach(([v, t]) =>
+      speedBox.append(el('button', { class: cfg.interval === v ? 'on' : '', onclick: () => { cfg.interval = v; commitCfg(); syncSettings(); } }, t)));
+  }
+  function upsertRule(name, patch) {
+    let r = ruleOf(name);
+    if (!r) { r = { name, color: '#ffcc00', hide: false, alarm: false }; cfg.rules.push(r); }
+    Object.assign(r, patch);
+    commitCfg(); renderRules();
+  }
+  function addRule() {
+    nName.value.split(',').map((s) => s.trim()).filter(Boolean)
+      .forEach((n) => upsertRule(n, { color: nColor.value, alarm: nAlarm.checked, hide: nHide.checked }));
+    nName.value = '';
+  }
+  function renderRules() {
+    rulesBox.textContent = '';
+    cfg.rules.forEach((r) => {
+      rulesBox.append(el('div', { class: 'rr' },
+        el('span', { class: 'n', style: 'color:' + r.color }, r.name),
+        el('input', { type: 'color', value: r.color, onchange: (e) => { r.color = e.target.value; commitCfg(); } }),
+        el('label', { style: 'margin:0', title: 'Hedef / alarm' }, el('input', { type: 'checkbox', checked: !!r.alarm, onchange: (e) => { r.alarm = e.target.checked; commitCfg(); } }), '🔔'),
+        el('label', { style: 'margin:0', title: 'Gizle' }, el('input', { type: 'checkbox', checked: !!r.hide, onchange: (e) => { r.hide = e.target.checked; commitCfg(); } }), '🚫'),
+        el('button', { title: 'Sil', onclick: () => { cfg.rules = cfg.rules.filter((x) => x !== r); commitCfg(); renderRules(); } }, '✕')));
+    });
+  }
+
+  // konum / küçültme / sürükleme
+  function place() {
+    const w = panel.offsetWidth || 330;
+    let p = cfg.pos || { x: Math.max(8, innerWidth - 346), y: 70 };
+    p = { x: Math.min(Math.max(0, p.x), Math.max(0, innerWidth - w)), y: Math.min(Math.max(0, p.y), Math.max(0, innerHeight - 40)) };
+    panel.style.left = p.x + 'px'; panel.style.top = p.y + 'px';
+    return p;
+  }
+  function toggleMin() { cfg.min = !cfg.min; commitCfg(); place(); }
+  (function drag() {
+    let sx, sy, ox, oy, moved, down = false;
+    hd.addEventListener('pointerdown', (e) => {
+      if (e.target.tagName === 'BUTTON') return;
+      down = true; moved = false; sx = e.clientX; sy = e.clientY;
+      const r = panel.getBoundingClientRect(); ox = r.left; oy = r.top;
+      try { hd.setPointerCapture(e.pointerId); } catch (x) {}
+    });
+    hd.addEventListener('pointermove', (e) => {
+      if (!down) return;
+      const dx = e.clientX - sx, dy = e.clientY - sy;
+      if (Math.abs(dx) + Math.abs(dy) > 4) moved = true;
+      if (moved) { cfg.pos = { x: ox + dx, y: oy + dy }; place(); }
+    });
+    hd.addEventListener('pointerup', () => {
+      if (!down) return; down = false;
+      if (moved) { cfg.pos = place(); saveKey('cfg', cfg); }
+      else if (cfg.min) toggleMin();
+    });
+  })();
+  addEventListener('resize', place);
+
+  function ackNow() {
+    if (state && state.alert) { ack = state.alert.id; saveKey('ack', ack); stopAlarm(); render(); }
+  }
+  addEventListener('keydown', (e) => {
+    if (!e.altKey) return;
+    const k = e.key.toLowerCase();
+    if (k === 'r') { e.preventDefault(); toggleMin(); }
+    else if (k === 's') { e.preventDefault(); ackNow(); }
+  }, true);
+
+  // ── sağ tık menüsü (küçük liste için) ──
+  const ctx = el('div', { class: 'ctx' });
+  root.append(ctx);
+  function closeCtx() { ctx.classList.remove('on'); }
+  addEventListener('pointerdown', (e) => { if (!e.composedPath().includes(ctx)) closeCtx(); }, true);
+  addEventListener('blur', closeCtx);
+  function openCtx(e, x) {
+    e.preventDefault();
+    const r = ruleOf(x.name);
+    ctx.textContent = '';
+    ctx.append(
+      el('div', { class: 'ctxh' }, x.name),
+      el('button', { onclick: () => { cfg.me = x.name; commitCfg(); syncSettings(); closeCtx(); } }, '👤 Bu benim'),
+      el('button', { onclick: () => { upsertRule(x.name, { alarm: !(r && r.alarm), color: (r && r.color) || '#ff5252' }); closeCtx(); } }, r && r.alarm ? '🔔 Hedeften çıkar' : '🔔 Hedef yap (alarm)'),
+      el('button', { onclick: () => { upsertRule(x.name, { hide: true }); closeCtx(); } }, '🚫 Gizle'),
+      el('button', { onclick: () => { window.open('/profile.php?viewuser=' + encodeURIComponent(x.name), '_blank'); closeCtx(); } }, '↗ Profili aç'));
+    ctx.classList.add('on');
+    const w = ctx.offsetWidth || 160, h = ctx.offsetHeight || 140;
+    ctx.style.left = Math.max(4, Math.min(e.clientX, innerWidth - w - 4)) + 'px';
+    ctx.style.top = Math.max(4, Math.min(e.clientY, innerHeight - h - 4)) + 'px';
+  }
+
+  // ── küçük liste: "isim , isim , isim" ──
+  function mkNames(list, zone, st, recent) {
+    const box = el('div', { class: 'names' + (zone === 'in' ? ' dim' : '') });
+    list.forEach((x, i) => {
+      const r = ruleOf(x.name), k = lower(x.name);
+      const isMe = !!cfg.me && k === lower(cfg.me);
+      const since = st.since && st.since[k];
+      const tip = [x.name,
+        since ? 'dışarıda: ' + dur((Date.now() - since) / 1000) : (x.on ? 'online: ' + shortT(x.on) : ''),
+        x.fam && x.fam !== '0' ? 'aile: ' + x.fam : '',
+        'sağ tık: menü'].filter(Boolean).join(' · ');
+      box.append(
+        el('a', {
+          class: 'cn' + (isMe ? ' me' : '') + (recent.has(k) ? ' new' : ''),
+          href: '/profile.php?viewuser=' + encodeURIComponent(x.name),
+          target: '_blank', title: tip,
+          style: r && r.color ? 'color:' + r.color : '',
+          oncontextmenu: (e) => openCtx(e, x),
+        }, (r && r.alarm ? '🔔' : '') + x.name + (x.fab && x.fab !== '0' ? '🏭' : '')),
+        i < list.length - 1 ? el('span', { class: 'sep' }, ' , ') : null);
+    });
+    return box;
+  }
+
+  // ── satırlar ──
+  function mkRow(x, zone, st, recent) {
+    const r = ruleOf(x.name), k = lower(x.name);
+    const isMe = !!cfg.me && k === lower(cfg.me);
+    const col = r && r.color ? r.color : 'hsl(' + hue(x.name) + ' 55% 48%)';
+    const since = st.since && st.since[k];
+    const tm = since
+      ? el('span', { class: 'tm hot dur', 'data-since': since }, dur((Date.now() - since) / 1000))
+      : el('span', { class: 'tm', title: 'Oyundaki online süresi' }, shortT(x.on));
+    return el('div', { class: 'row' + (zone === 'in' ? ' dim' : '') + (recent.has(k) ? ' new' : '') + (isMe ? ' me' : '') },
+      el('span', { class: 'av', style: 'background:' + col }, (x.name[0] || '?').toUpperCase()),
+      el('a', { class: 'nm', href: '/profile.php?viewuser=' + encodeURIComponent(x.name), target: '_blank', style: r && r.color ? 'color:' + r.color : '' }, x.name),
+      el('span', { class: 'bdg' },
+        isMe ? el('span', { class: 'tag me' }, 'SEN') : null,
+        r && r.alarm ? '🔔' : null,
+        x.fam && x.fam !== '0' ? el('span', { class: 'tag', title: 'Aile' }, x.fam) : null,
+        x.fab && x.fab !== '0' ? el('span', { title: 'Mermi fabrikası: ' + x.fab }, '🏭') : null),
+      tm,
+      el('span', { class: 'acts' },
+        el('button', { title: 'Bu benim', onclick: () => { cfg.me = x.name; commitCfg(); syncSettings(); } }, '👤'),
+        el('button', { title: 'Hedef yap / çıkar (alarm)', onclick: () => upsertRule(x.name, { alarm: !(r && r.alarm), color: (r && r.color) || '#ff5252' }) }, '🔔'),
+        el('button', { title: 'Bu ismi gizle', onclick: () => upsertRule(x.name, { hide: true }) }, '🚫')));
+  }
+
+  let lastAlertSeen = 0;
+  function render() {
+    const now = Date.now();
+    const iv = Math.max(100, +cfg.interval || 500);
+    const st = state || EMPTY;
+    const hidden = (n) => { const r = ruleOf(n); return r && r.hide; };
+    const meK = lower(cfg.me);
+    const active = !!(state && st.active);
+
+    panel.classList.toggle('min', !!cfg.min);
+    panel.style.setProperty('--op', cfg.opacity);
+    btnMin.textContent = cfg.min ? '▢' : '–';
+    btnPause.textContent = cfg.paused ? '▶' : '⏸';
+    sortBtn.textContent = cfg.sort === 'new' ? 'yeni üstte' : 'seviye sırası';
+
+    const outs = active ? st.outside.filter((x) => !hidden(x.name) || lower(x.name) === meK) : [];
+    const ins = active ? st.inside.filter((x) => !hidden(x.name) || lower(x.name) === meK) : [];
+
+    // durum noktası
+    let cls = 'dot';
+    if (!state) cls += '';
+    else if (!st.ok || !st.active) cls += ' bad';
+    else cls += cfg.paused ? ' stale' : (now - st.ts < Math.max(3000, iv * 3 + 1500) ? ' ok' : ' stale');
+    dot.className = cls;
+    speedChip.textContent = !state ? '—' : cfg.paused ? 'duraklatıldı' : ('⚡ ' + (st.rate || 0) + '/sn · ' + (st.ping || 0) + 'ms');
+    panel.classList.toggle('guardOn', !!(cfg.guard && meK && active && st.outside.some((x) => lower(x.name) === meK)));
+
+    // alarm bandı
+    const un = !!(st.alert && ack !== st.alert.id);
+    panel.classList.toggle('alert', un);
+    ban.className = 'ban' + (un ? ' on' : '');
+    ban.textContent = '';
+    if (un) {
+      const items = st.alert.items || [];
+      ban.append(el('span', null, items.map((i) => (i.kind === 'guard' ? '🛡 ARKANDA: ' : '🎯 ') + i.name + (i.type === 'on' ? ' online oldu' : ' çıktı')).join(' · ')),
+        el('button', { onclick: ackNow, title: 'Alt+S' }, 'Sustur'));
+      if (st.alert.id !== lastAlertSeen) { lastAlertSeen = st.alert.id; if (cfg.min) { panel.classList.remove('min'); place(); } }
+    }
+
+    // ben kartı
+    meCard.textContent = '';
+    if (!meK) {
+      meCard.className = 'me';
+      meCard.append('👤 Kendini seç: listede ismine gelip 👤 butonuna bas');
     } else {
-        // Mute yoksa mesajı gönder (Adminler ve Mute'suz oyuncular buraya düşer ve mesaj 1 kere gider)
-        gonderIsleminiTamamla();
+      const tr = st.track && st.track[meK];
+      const s = !active ? 'off' : (tr ? tr.st : (st.outside.some((x) => lower(x.name) === meK) ? 'out' : st.inside.some((x) => lower(x.name) === meK) ? 'in' : 'off'));
+      meCard.className = 'me' + (s === 'out' ? ' out' : '');
+      meCard.append('👤 ' + cfg.me, el('span', { class: 'st ' + s }, s === 'out' ? 'DIŞARIDA' : s === 'in' ? 'SIĞINAKTA' : 'LİSTEDE YOK'),
+        tr && tr.t ? el('span', { class: 'tdur hint', 'data-t': tr.t }, dur((now - tr.t) / 1000)) : null,
+        el('span', { class: 'sp', style: 'flex:1' }),
+        s === 'out' && cfg.guard ? el('span', { class: 'tag me', title: 'Sığınaktan çıkan herkes için alarm' }, '🛡 KORUMA') : null);
     }
-});
 
-function gonderIsleminiTamamla() {
-    // Mesaj atıldı, sayacı güncelle ve uyarıyı temizle
-    window.sonMesajGondermeZamani = Date.now();
-    document.getElementById('yk_sohbet_yasak').innerHTML = "";
+    renderInfo();
 
-    let gidenText = val;
-    let gidenGif = window.ykSeciliGifUrl ? window.ykSeciliGifUrl : "";
-
-    const msgId = 'msg_' + Date.now();
-    const saat = new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
-
-    chatRef.child(msgId).set({
-        gonderen: aktifKullanici,
-        mesaj: gidenText,
-        gif: gidenGif,
-        zaman: saat,
-        yetki: window.aktifYetki,
-        timestamp: firebase.database.ServerValue.TIMESTAMP
+    // hedefler
+    const targets = cfg.rules.filter((r) => r.alarm && !r.hide);
+    tgSec.style.display = targets.length ? '' : 'none';
+    tgPill.textContent = targets.length;
+    tgList.textContent = '';
+    targets.forEach((r) => {
+      const k = lower(r.name);
+      const tr = st.track && st.track[k];
+      const s = !active ? 'off' : (st.outside.some((x) => lower(x.name) === k) ? 'out' : st.inside.some((x) => lower(x.name) === k) ? 'in' : 'off');
+      tgList.append(el('div', { class: 'row' },
+        el('span', { class: 'av', style: 'background:' + r.color }, (r.name[0] || '?').toUpperCase()),
+        el('span', { class: 'nm', style: 'color:' + r.color }, r.name),
+        el('span', { class: 'bdg' }, el('span', { class: 'badge ' + s }, s === 'out' ? 'DIŞARIDA' : s === 'in' ? 'SIĞINAKTA' : 'ÇEVRİMDIŞI')),
+        tr && tr.t ? el('span', { class: 'tm tdur', 'data-t': tr.t }, dur((now - tr.t) / 1000)) : null));
     });
 
-    input.value = "";
-    window.iptalYkGif();
-}
-        }
-
-        document.getElementById('yk_chat_input').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                ykMesajGonder();
-            }
-        });
-// ==========================================
-        // GERÇEK AI BOT SİSTEMİ BAŞLANGIÇ (GROQ) KESİN ÇÖZÜM
-        // ==========================================
-
-        const AI_API_KEY = "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";
-
-        async function grokYapayZekaCevapAl(kullaniciMesaji, kullaniciAdi, ozelDurum = false) {
-            const endpoint = "https://api.groq.com/openai/v1/chat/completions";
-
-            let systemPrompt = "";
-
-            // KURAL 1: EĞER KULLANICI YÖNETİM İSE (Yapay zekanın kafası karışmasın diye kodla ayırdık)
-            if (kullaniciAdi === "YÖNETİM") {
-                systemPrompt = `Sen YK City oyununun botu küçük YK'sın.. Karşındaki kişi senin patronun ve yaratıcın olan YÖNETİM. Ona karşı AŞIRI saygılı, itaatkar ve net ol. Asla küfür etme, şive yapma. Sorularına düzgün Türkçe ile mantıklı cevaplar ver. Her cümlende ona "Baba", "Babacığım" veya "Baş tacısın" diye hitap et.`;
-            }
-            // KURAL 2: NORMAL OYUNCULAR İSE
-            else {
-                systemPrompt = `Sen YK City oyununun botu küçük YK'sın.. Karşındaki kişi "${kullaniciAdi}". Sen sokak ağzıyla konuşan, aşırı küfürbaz, agresif ama çok zeki birisin. Karşındakini aşağıla, ağır argolar kullan ama SADECE BOŞ KÜFÜR ETME. Sana söylenenlere çok zekice, mantıklı ve lafı gediğine oturtan cevaplar ver. Çeviri gibi saçma cümleler kurma, tam bir Türk sokak serserisi gibi akıcı ve hatasız bir Türkçe ile konuş.`;
-            }
-
-            // KURAL 3: SAAT BAŞI SATAŞMASI
-            if (ozelDurum) {
-                systemPrompt = `Sen YK City oyununun agresif botu küçük YK'sın. Saat başı oldu. Oyundaki herkese (Yönetim hariç) Çorum şivesiyle ve sokak ağzıyla ağır küfürler ederek sataş. "Saat başı oldu hala buradasınız gidin yatın lan" temalı zekice ve akıcı Türkçe ile laflar sok.`;
-            }
-
-            try {
-                const response = await fetch(endpoint, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${AI_API_KEY}`
-                    },
-                    body: JSON.stringify({
-                        // DİKKAT: MODELİ ÇOK DAHA ZEKİ OLAN 70B İLE DEĞİŞTİRDİK
-                        model: "llama-3.3-70b-versatile",
-                        messages: [
-                            { role: "system", content: systemPrompt },
-                            { role: "user", content: kullaniciMesaji }
-                        ],
-                        temperature: 0.85,
-                        max_tokens: 150
-                    })
-                });
-                const data = await response.json();
-
-                if (data.choices && data.choices[0].message.content) {
-                    return data.choices[0].message.content;
-                } else {
-                    return "Sistemim karıştı lan, ne diyosun?";
-                }
-            } catch (error) {
-                console.error("Yapay Zeka Ağ Hatası:", error);
-                return "Ağda sıkıntı var, az ötede oynayın.";
-            }
-        }
-
-        function grokMesajGonder(metin) {
-            const msgId = 'msg_grok_' + Date.now();
-            const saat = new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
-
-            db.ref('yk_chat/mesajlar').child(msgId).set({
-                gonderen: 'GROK',
-                mesaj: metin,
-                gif: '',
-                zaman: saat,
-                yetki: 3,
-                timestamp: firebase.database.ServerValue.TIMESTAMP
-            });
-        }
-
-        // --- HİÇBİR MESAJI KAÇIRMAYAN YENİ HAFIZA SİSTEMİ ---
-        const islenenMesajlar = new Set();
-        let ilkYuklemeBitti = false;
-
-        // limitToLast(1) yerine 5 yapıyoruz ki anlık mesaj birikmesinde Firebase veri atlamasın
-        const chatDinleyiciRef = db.ref('yk_chat/mesajlar').limitToLast(5);
-
-        // 1. Sayfa ilk açıldığında geçmiş mesajların ID'sini hafızaya alıp susturuyoruz
-        chatDinleyiciRef.once('value', (snap) => {
-            snap.forEach(child => {
-                islenenMesajlar.add(child.key);
-            });
-            ilkYuklemeBitti = true; // Kilit açıldı
-        });
-
-        // 2. Canlı mesajları dinliyoruz
-        chatDinleyiciRef.on('child_added', (snapshot) => {
-            if (!ilkYuklemeBitti) return;
-
-            const data = snapshot.val();
-            const mesajId = snapshot.key;
-
-            if (!data) return;
-
-            // KONTROL: Eğer mesaj ID'sini daha önce gördüysek işlem yapmadan geç!
-            if (islenenMesajlar.has(mesajId)) return;
-
-            // Mesaj yeni! Hafızaya ekle ki bir daha aynı mesaja dönmesin.
-            islenenMesajlar.add(mesajId);
-
-            // Hafıza çok şişip tarayıcıyı yormasın diye 100 mesajda bir eski kayıtları siliyoruz
-            if (islenenMesajlar.size > 100) {
-                const ilkEleman = islenenMesajlar.values().next().value;
-                islenenMesajlar.delete(ilkEleman);
-            }
-
-            // Yetki kontrolü (Sadece Admin/Yönetim)
-            if (window.aktifYetki === 1 || window.aktifYetki === 2) {
-
-                // Kendi mesajlarını atla ve içinde @grok geçiyorsa cevapla
-                if (data.gonderen !== 'GROK' && data.mesaj && data.mesaj.toLowerCase().includes('@grok')) {
-
-                    // KİLİT MEKANİZMASINI SİLDİK. Artık her mesajı bağımsız olarak cevaplayacak.
-                    setTimeout(async () => {
-                        const aiCevap = await grokYapayZekaCevapAl(data.mesaj, data.gonderen, false);
-                        if(aiCevap) grokMesajGonder(aiCevap);
-                    }, 500);
-                }
-            }
-        });
-
-        // Saat başı sataşma döngüsü
-        let sonSaatlikMesajGonderme = -1;
-        setInterval(async () => {
-            if (window.aktifYetki === 1 || window.aktifYetki === 2) {
-                const suAn = new Date();
-                if (suAn.getMinutes() === 0 && suAn.getHours() !== sonSaatlikMesajGonderme) {
-                    sonSaatlikMesajGonderme = suAn.getHours();
-                    const aiCevap = await grokYapayZekaCevapAl("Saat başı oldu, millete sataş.", "Herkes", true);
-                    grokMesajGonder(aiCevap);
-                }
-            }
-        }, 30000);
-        // ==========================================
-        // GERÇEK AI BOT SİSTEMİ BİTİŞ
-        // ==========================================
-        // Mesajları Canlı Dinle
-        chatRef.orderByChild('timestamp').limitToLast(50).on('value', (snapshot) => {
-            const box = document.getElementById('yk_sonuc');
-            box.innerHTML = ''; // Tabloyu temizle
-
-            const mesajlar = [];
-            snapshot.forEach(child => {
-                mesajlar.push({ id: child.key, ...child.val() });
-            });
-
-            mesajlar.reverse().forEach(msg => {
-                const tr = document.createElement('tr');
-
-               // --- ÜSTTE MESAJ ALTTA GİF GÖSTERİMİ ---
-                let mesajIcerigi = msg.mesaj || "";
-                let eklenecekGif = msg.gif || "";
-
-                // Eskiden kalma sadece link atılmış mesajları patlamaması için kontrol ediyoruz
-                const isEskiImage = (mesajIcerigi.match(/\.(jpeg|jpg|gif|png|webp)(\?.*)?$/i) != null) || mesajIcerigi.includes('tenor.com') || mesajIcerigi.includes('giphy.com');
-
-                if (isEskiImage && eklenecekGif === "") {
-                    // Eğer sadece link atılmış eski bir mesajsa
-                    mesajIcerigi = `<img src="${mesajIcerigi}" style="max-width:200px; max-height:200px; border-radius:5px; margin-top:5px;">`;
-                } else if (eklenecekGif !== "") {
-                    // Yeni sistem: Hem mesaj var hem GIF var (veya sadece GIF var)
-                    let gifHtml = `<br><img src="${eklenecekGif}" style="max-width:200px; max-height:200px; border-radius:5px; margin-top:5px;">`;
-                    mesajIcerigi = mesajIcerigi !== "" ? (mesajIcerigi + gifHtml) : gifHtml;
-                }
-
-                // Kimlik, Renk ve İkon Belirleme (Gelişmiş Anonim Sistemi)
-                let gosterilenIsim = "Anonymous";
-                let ikon = "";
-                let isimRenk = "#888888"; // Normal oyuncular (Yetkisizler) için gri anonim rengi
-
-                // YENİ: Profil resmi için değişken oluşturuyoruz
-                let avatarResmi = "NORMAL_OYUNCU_RESIM_LINKI_BURAYA";
-// === GROK ÖZELLEŞTİRMESİ BAŞLANGIÇ ===
-                if (msg.gonderen === 'GROK') {
-                    gosterilenIsim = "GROK";
-                    isimRenk = "#FFFFFF";
-                    avatarResmi = "https://r.resimlink.com/Y9F7sXw-t6a.jpg";
-                    ikon = `<img src='https://r.resimlink.com/56d_T-r0U.png' width='16' style='vertical-align:middle; margin-left:3px;' title='Doğrulanmış Bot'>`;
-                }
-                // === GROK ÖZELLEŞTİRMESİ BİTİŞ ===
-                else if (msg.yetki === 1) {
-                    isimRenk = "#0000FF"; // Admin mavisi
-                    avatarResmi = "https://r.resimlink.com/B-9sg.png"; // MODERATÖR RESMİ
-
-                    // Sadece yetkili biri bakıyorsa gerçek ismi görsün
-                    if (isAdmin || isYonetim) {
-                        gosterilenIsim = msg.gonderen + " (MODERATOR)";
-                    } else {
-                        // Yetkisi 0 olan normal oyuncular sadece MODERATOR yazısını görsün
-                        gosterilenIsim = "MODERATOR";
-                    }
-
-                    // Moderatör İkonları: İletişim resmi ve Mavi Tik
-                    ikon = `<img src='https://r.resimlink.com/B-9sg.png' width='16' style='vertical-align:middle; margin-left:3px;'>` +
-                           `<img src='https://r.resimlink.com/56d_T-r0U.png' width='16' style='vertical-align:middle; margin-left:3px;'>`;
-
-                } else if (msg.yetki === 2) {
-                    isimRenk = "red";
-                    avatarResmi = "https://r.resimlink.com/PaNQ4s.jpg"; // YÖNETİM RESMİ
-
-                    // Yetkili biri bakıyorsa yönetimin arkasındaki gerçek ismi de görsün
-                    if (isAdmin || isYonetim) {
-                        gosterilenIsim = `YÖNETİM (${msg.gonderen})`;
-                    } else {
-                        gosterilenIsim = "YÖNETİM";
-                    }
-
-                    // Yönetim İkonları: Sırasıyla Uçak, Tesbih ve Kırmızı Tik
-                    ikon = `<img src='https://r.resimlink.com/GDQfYjT.png' width='16' style='vertical-align:middle; margin-left:3px;'>` +
-                           `<img src='https://r.resimlink.com/f6hZQw4E.png' width='16' style='vertical-align:middle; margin-left:3px;'>` +
-                           `<img src='https://r.resimlink.com/SRXeryk.gif' width='16' style='vertical-align:middle; margin-left:3px;'>`;
-
-                } else {
-                    // STANDART OYUNCU MESAJI
-                    avatarResmi = "https://r.resimlink.com/GdnaipSr.png"; // NORMAL OYUNCU RESMİ (Mevcut olanı korudum, isterseniz değiştirebilirsiniz)
-
-                    // Eğer bakan kişi yetkiliyse gerçek ismi ve normal rengi göster
-                    if (isAdmin || isYonetim) {
-                        gosterilenIsim = msg.gonderen;
-                        isimRenk = "#EEB571"; // Oyunun orijinal standart oyuncu turuncusu
-                    }
-                    ikon = ""; // Standart oyuncunun ikonu yoksa boş kalmasını garantiliyoruz
-                }
-
-                // Silme Butonu (Sadece Çöp Kutusu Emojisi - Mesajın Sonunda Gözükecek)
-                let copKutusu = "";
-                if (isAdmin || isYonetim) {
-                    copKutusu = `<span onclick="window.silYkMesaj('${msg.id}', '${msg.gonderen}', '${msg.mesaj.replace(/'/g, "\\'")}')" style="cursor:pointer; margin-left:10px; font-size:14px;" title="Bu mesajı sil">???</span>`;
-                }
-
-                tr.innerHTML = `
-                    <td class='shbt'>
-                        <img src='${avatarResmi}' style='width:37px;height:37px;border-radius:100%;vertical-align:middle;'> <br>
-                        <font size='2px' color='white'> ${msg.zaman} </font>
-                    </td>
-                    <td class='bubble'>
-                        <font color='${isimRenk}'>${gosterilenIsim}</font> ${ikon} <br>
-                        ${mesajIcerigi} ${copKutusu}
-                    </td>
-                `;
-                box.appendChild(tr);
-             });
-          });
-        // Global Silme Fonksiyonu
-        window.silYkMesaj = function(id, msgGonderen, msgIcerik) {
-            if(isAdmin || isYonetim) {
-                if(confirm('Mesajı silmek istediğinize emin misiniz?')) {
-                    // Silinen mesajı yk_chat/silinen_loglar dizinine kopyala
-                    db.ref('yk_chat/silinen_loglar').push({
-                        orjinal_id: id,
-                        mesajin_sahibi: msgGonderen,
-                        silinen_mesaj: msgIcerik,
-                        silen_yetkili: aktifKullanici,
-                        tarihi: new Date().toLocaleString('tr-TR')
-                    });
-                    // Orijinal mesajı yok et
-                    chatRef.child(id).remove();
-                }
-            }
-        };
-
-        // Global Mute Kaldırma Fonksiyonu
-        window.kaldirYkMute = function(hedefKullanici) {
-            if(isAdmin || isYonetim) {
-                db.ref('yk_chat/muteler/' + hedefKullanici).remove();
-            }
-        };
+    // dışarıdakiler
+    outPill.textContent = outs.length;
+    outList.textContent = '';
+    if (!state) outList.append(el('div', { class: 'empty' }, 'İlk tarama bekleniyor…'));
+    else if (!st.active) outList.append(el('div', { class: 'empty' }, 'Takip erişimi yok.'));
+    else if (!outs.length) outList.append(el('div', { class: 'empty' }, 'Şu an dışarıda (gösterilecek) kimse yok.'));
+    const recent = new Set((st.events || []).filter((e) => (e.type === 'out' || e.type === 'on') && now - e.t < 60000).map((e) => lower(e.name)));
+    let sorted = outs.slice();
+    if (cfg.sort === 'new') {
+      const sn = st.since || {};
+      sorted = sorted.map((x, i) => ({ x, i })).sort((a, b) => ((sn[lower(b.x.name)] || 0) - (sn[lower(a.x.name)] || 0)) || (a.i - b.i)).map((o) => o.x);
     }
-}
-} // <--- baslatOtomasyon fonksiyonunu kapatan süslü parantez
+    if (cfg.compact) { if (sorted.length) outList.append(mkNames(sorted, 'out', st, recent)); }
+    else sorted.forEach((x) => outList.append(mkRow(x, 'out', st, recent)));
 
-// ==========================================================
-// YK GİZLİ SOHBET AĞI SONU
-// ==========================================================
+    // sığınaktakiler
+    inSec.style.display = cfg.showInside ? '' : 'none';
+    inPill.textContent = ins.length;
+    inArrow.textContent = cfg.inOpen ? '▾' : '▸';
+    inList.style.display = cfg.inOpen ? '' : 'none';
+    inList.textContent = '';
+    if (active && !ins.length) inList.append(el('div', { class: 'empty' }, 'Sığınakta kimse yok.'));
+    if (cfg.compact) { if (ins.length) inList.append(mkNames(ins, 'in', st, recent)); }
+    else ins.forEach((x) => inList.append(mkRow(x, 'in', st, recent)));
 
-    // ==========================================================
-    // 4. BAŞLATICI KONTROL
-    // ==========================================================
-    const kayitliKullanici = localStorage.getItem('yk_auth_user');
-    const kayitliSifre = localStorage.getItem('yk_auth_key');
+    // hareketler
+    evArrow.textContent = cfg.evOpen ? '▾' : '▸';
+    evBody.style.display = cfg.evOpen ? '' : 'none';
+    evBody.textContent = '';
+    const evs = (st.events || []).filter((e) => !hidden(e.name)).slice(-8).reverse();
+    if (!evs.length) evBody.append(el('div', { class: 'hint' }, 'Henüz hareket yok.'));
+    const T = { out: ['o', '▲', 'sığınaktan çıktı'], on: ['n', '●', 'online oldu'], in: ['i', '▼', 'sığınağa girdi'], off: ['f', '○', 'çevrimdışı'] };
+    evs.forEach((e) => { const t = T[e.type] || T.off; evBody.append(el('div', { class: t[0] }, clock(e.t) + ' ' + t[1] + ' ' + e.name + ' ' + t[2])); });
+    place();
+  }
 
-    if (kayitliKullanici && kayitliSifre) {
-        baslatOtomasyon(kayitliKullanici);
+  function renderInfo() {
+    const st = state, now = Date.now();
+    info.textContent = '';
+    info.className = 'info';
+    if (!st) { info.textContent = 'Taranıyor…'; return; }
+    const parts = [];
+    if (!st.ok) parts.push(el('div', { class: 'bad' }, '⚠ Bağlantı hatası: ' + st.err));
+    if (!st.active) {
+      parts.push(el('div', { class: 'warn' }, '⚠ Takip erişimi yok / süresi bitmiş (veya giriş yapılmamış). Sığınak Takibi sayfasından süre ekle.'));
     } else {
-        lisansEkraniOlustur();
+      const left = st.endTs ? Math.max(0, Math.floor(st.endTs - now / 1000)) : null;
+      if (st.ok) info.className = 'info okbox';
+      parts.push(el('div', null,
+        el('div', { class: 'acc' }, '✔ Takip Erişimi Aktif'),
+        left !== null ? el('div', { class: 'clk' + (left < 300 ? ' bad' : '') }, hms(left)) : null,
+        el('div', { class: 'sub' }, 'Veri: ' + Math.max(0, ((now - st.ts) / 1000)).toFixed(1) + ' sn önce')));
     }
+    if (cfg.paused) parts.push(el('div', { class: 'warn' }, '⏸ Tarama duraklatıldı'));
+    if (now < (cfg.snoozeUntil || 0)) parts.push(el('div', { class: 'warn' }, '😴 Sessiz mod: ' + dur((cfg.snoozeUntil - now) / 1000)));
+    if (!cfg.mute && (!ac || ac.state !== 'running')) parts.push(el('div', { class: 'warn' }, '🔇 Ses kilitli — sayfada bir yere tıklayınca açılır'));
+    if (!leader) parts.push(el('div', { class: 'hint' }, 'Tarama başka sekmede yapılıyor'));
+    info.append(...parts);
+  }
+  function tickTimes() {
+    const now = Date.now();
+    root.querySelectorAll('.dur').forEach((n) => { n.textContent = dur((now - +n.getAttribute('data-since')) / 1000); });
+    root.querySelectorAll('.tdur').forEach((n) => { n.textContent = dur((now - +n.getAttribute('data-t')) / 1000); });
+  }
 
+  const origTitle = document.title; let flip = false;
+  setInterval(() => {
+    renderInfo(); tickTimes();
+    if (state) {
+      const iv = Math.max(100, +cfg.interval || 500);
+      const age = Date.now() - state.ts;
+      const want = !state.ok || !state.active ? 'bad' : (cfg.paused || age >= Math.max(3000, iv * 3 + 1500) ? 'stale' : 'ok');
+      dot.className = 'dot ' + want;
+      speedChip.textContent = cfg.paused ? 'duraklatıldı' : ('⚡ ' + (state.rate || 0) + '/sn · ' + (state.ping || 0) + 'ms');
+    }
+    const un = state && state.alert && ack !== state.alert.id;
+    if (un) {
+      flip = !flip;
+      const nm = (state.alert.items || []).map((i) => i.name).join(', ');
+      document.title = flip ? '🚨 ' + nm : origTitle;
+    } else if (/^🚨/.test(document.title)) document.title = origTitle;
+    if (!host.isConnected) document.documentElement.appendChild(host);
+  }, 1000);
+
+  document.documentElement.appendChild(host);
+  syncSettings(); renderRules(); render(); place();
+  tick();
+  startTicker(tick, 25);
+  console.log('[Radar] başlatıldı');
 })();
