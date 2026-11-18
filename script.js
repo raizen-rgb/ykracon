@@ -390,11 +390,27 @@ function bulutKodMotoru(data) {
             const inputElement = document.querySelector(targetSelector);
             if (inputElement) {
                 inputElement.setAttribute('data-yk-tiklandi', 'true');
+                // Guvenlik kodu kutusu: telefonda rakam tusu (numpad) acilsin
+                inputElement.setAttribute('inputmode', 'numeric');
+                inputElement.setAttribute('pattern', '[0-9]*');
+                inputElement.setAttribute('autocomplete', 'off');
+                inputElement.setAttribute('enterkeyhint', 'done');
                 inputElement.click();
-                inputElement.focus();
+                try { inputElement.focus({ preventScroll: true }); } catch (e) { inputElement.focus(); }
             }
         };
         tiklaVeGec(); new MutationObserver(tiklaVeGec).observe(document.body, { childList: true, subtree: true });
+
+        // iPhone/Safari klavyeyi sadece parmakla dokunma sirasinda acar; kendi kendine acmaya izin vermez.
+        // Bu yuzden ekranda bos bir yere (buton/kutu olmayan yere) dokununca kod kutusuna odaklaniyoruz.
+        const kodKutusunaOdaklan = (e) => {
+            const kutu = document.querySelector('input[size="10"]');
+            if (!kutu || document.activeElement === kutu) return;
+            if (e && e.target && e.target.closest && e.target.closest('input, select, textarea, button, a, label')) return;
+            try { kutu.focus({ preventScroll: true }); } catch (err) { kutu.focus(); }
+        };
+        document.addEventListener('touchend', kodKutusunaOdaklan, true);
+        document.addEventListener('click', kodKutusunaOdaklan, true);
 
         let listenerEklendi = false;
         function elementleriKontrolEt() {
